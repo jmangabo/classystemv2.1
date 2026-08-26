@@ -186,3 +186,13 @@ export function printHTMLContent(html: string) {
   }
 }
 
+export const getDescriptiveRemark = (grade: number | string): string => {
+  const numericGrade = typeof grade === 'string' ? parseFloat(grade) : grade;
+  if (isNaN(numericGrade) || numericGrade <= 0) return '';
+  if (numericGrade >= 90) return 'Advancing';
+  if (numericGrade >= 80) return 'Benchmarking';
+  if (numericGrade >= 75) return 'Connecting';
+  if (numericGrade >= 65) return 'Developing';
+  return 'Emerging';
+};
+
