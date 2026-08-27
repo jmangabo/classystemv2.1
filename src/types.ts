@@ -239,8 +239,30 @@ export interface UserProfile {
   schoolId?: string;
   approvalStatus?: 'pending' | 'approved' | 'rejected';
   expiresAt?: string;
+  createdAt?: string;
   themeSettings?: SystemThemeSettings;
 }
+
+export const DEFAULT_DEPED_SUBJECTS: Subject[] = [
+  { id: 'sub_eng', name: 'English', gradeLevel: 7, subjectType: 'CORE', group: 'Revised K-10 Curriculum', wwWeight: 30, ptWeight: 50, taWeight: 20 },
+  { id: 'sub_fil', name: 'Filipino', gradeLevel: 7, subjectType: 'CORE', group: 'Revised K-10 Curriculum', wwWeight: 30, ptWeight: 50, taWeight: 20 },
+  { id: 'sub_math', name: 'Mathematics', gradeLevel: 7, subjectType: 'CORE', group: 'Revised K-10 Curriculum', wwWeight: 40, ptWeight: 40, taWeight: 20 },
+  { id: 'sub_sci', name: 'Science', gradeLevel: 7, subjectType: 'CORE', group: 'Revised K-10 Curriculum', wwWeight: 40, ptWeight: 40, taWeight: 20 },
+  { id: 'sub_ap', name: 'Araling Panlipunan (AP)', gradeLevel: 7, subjectType: 'CORE', group: 'Revised K-10 Curriculum', wwWeight: 30, ptWeight: 50, taWeight: 20 },
+  { id: 'sub_esp', name: 'Edukasyon sa Pagpapakatao (ESP)', gradeLevel: 7, subjectType: 'CORE', group: 'Revised K-10 Curriculum', wwWeight: 30, ptWeight: 50, taWeight: 20 },
+  { id: 'sub_tle', name: 'Technology and Livelihood Education (TLE)', gradeLevel: 7, subjectType: 'CORE', group: 'Revised K-10 Curriculum', wwWeight: 20, ptWeight: 60, taWeight: 20 },
+  { id: 'sub_mapeh', name: 'MAPEH', gradeLevel: 7, subjectType: 'CORE', group: 'Revised K-10 Curriculum', wwWeight: 20, ptWeight: 60, taWeight: 20 }
+];
+
+export const DEFAULT_OBSERVED_VALUES = [
+  { id: 'makadiyos_1', coreValue: 'Maka-Diyos', behaviorStatement: 'Expresses one\'s spiritual beliefs while respecting the spiritual beliefs of others.' },
+  { id: 'makadiyos_2', coreValue: 'Maka-Diyos', behaviorStatement: 'Shows adherence to ethical principles by upholding truth.' },
+  { id: 'makatao_1', coreValue: 'Makatao', behaviorStatement: 'Demonstrates sensitive and appropriate conduct towards others.' },
+  { id: 'makatao_2', coreValue: 'Makatao', behaviorStatement: 'Acts respectfully without prejudice towards people from diverse backgrounds.' },
+  { id: 'makakalikasan_1', coreValue: 'Makakalikasan', behaviorStatement: 'Cares for the environment and utilizes resources prudently, economically, and efficiently.' },
+  { id: 'makabansa_1', coreValue: 'Makabansa', behaviorStatement: 'Demonstrates pride in being a Filipino; exercises the rights and responsibilities of a Filipino citizen.' },
+  { id: 'makabansa_2', coreValue: 'Makabansa', behaviorStatement: 'Demonstrates appropriate behavior in carrying out activities in school and the community.' }
+];
 
 export interface Course {
   name: string;
