@@ -1734,7 +1734,7 @@ export function PTAFeesManagementView({
         <div className="flex items-center gap-2.5">
           <ShieldAlert className="text-amber-600 shrink-0" size={18} />
           <p className="text-xs md:text-sm font-semibold tracking-wide">
-            <span className="font-bold underline text-amber-950">DepEd Policy Compliance Notice:</span> "PTA's collections are strictly voluntary. Enrolling, grading, and release of grades cannot be withheld due to PTA contribution standing."
+            <span className="font-bold underline text-amber-950">DepEd Policy Compliance Notice:</span> “PTA’s collections are strictly voluntary. Enrolling, grading, and release of grades cannot be withheld due to PTA contribution standing.”
           </p>
         </div>
         <div className="bg-amber-600/10 text-amber-800 font-mono text-[10px] uppercase font-bold px-2 py-0.5 rounded tracking-widest hidden md:inline-block">
