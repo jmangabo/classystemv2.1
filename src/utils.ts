@@ -48,17 +48,6 @@ export function getTleDisplayName(name: string | undefined): string {
   return "Technology and Livelihood Education (TLE)";
 }
 
-export const getGradeDescriptor = (grade: number | string | null | undefined): string => {
-  if (grade === null || grade === undefined || grade === '') return '';
-  const num = typeof grade === 'string' ? parseFloat(grade) : grade;
-  if (isNaN(num) || num <= 0) return '';
-  if (num >= 90) return 'Advancing';
-  if (num >= 80) return 'Benchmarking';
-  if (num >= 75) return 'Connecting';
-  if (num >= 65) return 'Developing';
-  return 'Emerging';
-};
-
 export const getSubjectSortScore = (name: string): number => {
   if (!name) return 1000;
   
