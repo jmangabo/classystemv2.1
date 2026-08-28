@@ -1,6 +1,6 @@
 import React, { useRef, useMemo, useState, useEffect } from 'react';
 import { Student, Subject, Section, School, TermNumber } from '../types';
-import { formatStudentName, printHTMLContent, getGradeDescriptorRemark, getGradeDescriptorColor } from '../utils';
+import { formatStudentName, printHTMLContent } from '../utils';
 import { FileSpreadsheet, Printer, Download, X } from 'lucide-react';
 import * as XLSX from 'xlsx-js-style';
 import { db, safeGetDocs as getDocs } from '../firebase';
@@ -17,6 +17,14 @@ interface ClassRecordReportModalProps {
   calculateGrade: (student: Student, subject: Subject, term: TermNumber) => any;
   refData: any;
 }
+
+const getDescriptiveRemark = (grade: number): string => {
+  if (grade >= 90) return "Advancing";
+  if (grade >= 80) return "Benchmarking";
+  if (grade >= 75) return "Connecting";
+  if (grade >= 65) return "Developing";
+  return "Emerging";
+};
 
 export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
   isOpen,
@@ -87,7 +95,7 @@ export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
         indices.push(i);
       }
     }
-    return indices.length > 0 ? indices : [0];
+    return indices;
   }, [refData, students, selectedSubject, activeTerm]);
 
   const activePTIndices = useMemo(() => {
@@ -103,7 +111,7 @@ export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
         indices.push(i);
       }
     }
-    return indices.length > 0 ? indices : [0];
+    return indices;
   }, [refData, students, selectedSubject, activeTerm]);
 
   const activeSTIndices = useMemo(() => {
@@ -584,15 +592,13 @@ export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
       createCell("LRN", { bold: true, bg: 'F1F5F9' }),
       
       // WW
-      createCell(`WRITTEN WORKS (${selectedSubject.wwWeight}%)`, { bold: true, bg: 'DBEAFE' }),
-      ...new Array(Math.max(0, activeWWIndices.length - 1)).fill(emptyCell()),
+      ...(activeWWIndices.length > 0 ? [createCell(`WRITTEN WORKS (${selectedSubject.wwWeight}%)`, { bold: true, bg: 'DBEAFE' }), ...new Array(activeWWIndices.length - 1).fill(emptyCell())] : []),
       createCell("WW Total", { bold: true, bg: 'BFDBFE' }),
       createCell("WW PS", { bold: true, bg: 'BFDBFE' }),
       createCell("WW WS", { bold: true, bg: 'BFDBFE' }),
 
       // PT
-      createCell(`PERFORMANCE TASKS (${selectedSubject.ptWeight}%)`, { bold: true, bg: 'DCFCE7' }),
-      ...new Array(Math.max(0, activePTIndices.length - 1)).fill(emptyCell()),
+      ...(activePTIndices.length > 0 ? [createCell(`PERFORMANCE TASKS (${selectedSubject.ptWeight}%)`, { bold: true, bg: 'DCFCE7' }), ...new Array(activePTIndices.length - 1).fill(emptyCell())] : []),
       createCell("PT Total", { bold: true, bg: 'BBF7D0' }),
       createCell("PT PS", { bold: true, bg: 'BBF7D0' }),
       createCell("PT WS", { bold: true, bg: 'BBF7D0' }),
@@ -712,9 +718,9 @@ export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
           // Final Grades
           createCell(r.initialGrade > 0 ? r.initialGrade.toFixed(2) : "-", {}),
           createCell(r.finalGrade > 0 ? r.finalGrade : "-", { bold: true }),
-          createCell(r.finalGrade > 0 ? getGradeDescriptorRemark(r.finalGrade) : "-", {
+          createCell(r.finalGrade > 0 ? getDescriptiveRemark(r.finalGrade) : "-", {
             bold: true,
-            color: getGradeDescriptorColor(r.finalGrade).hex
+            color: r.finalGrade >= 75 ? '15803D' : 'B91C1C'
           })
         ];
         rows.push(row);
@@ -724,9 +730,9 @@ export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
     renderExcelGroup(`MALE LEARNERS (${maleStats.count})`, maleStats.rows || []);
     renderExcelGroup(`FEMALE LEARNERS (${femaleStats.count})`, femaleStats.rows || []);
 
-    // Summary Statistics - Table I
+    // Summary Statistics
     rows.push([]);
-    rows.push([createCell("I. SUMMARY OF LEARNER EVALUATION & MPS", { bold: true, bg: 'E2E8F0', align: 'left' })]);
+    rows.push([createCell("SUMMARY OF LEARNER PERFORMANCE & MPS", { bold: true, bg: 'E2E8F0', align: 'left' })]);
     rows.push([
       createCell("Category", { bold: true, bg: 'F1F5F9' }),
       createCell("Enrolled", { bold: true, bg: 'F1F5F9' }),
@@ -763,32 +769,6 @@ export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
       createCell(`${overallStats.passingRate.toFixed(2)}%`, { bold: true, bg: 'FEF3C7' }),
       createCell(overallStats.mps.toFixed(2), { bold: true, bg: 'FEF3C7' })
     ]);
-
-    // Table II: Learning Area Grading Scale Distribution & Descriptors
-    rows.push([]);
-    rows.push([createCell("II. LEARNING AREA GRADING SCALE DISTRIBUTION & DESCRIPTORS", { bold: true, bg: 'E2E8F0', align: 'left' })]);
-    rows.push([
-      createCell("Level of Proficiency / Descriptors", { bold: true, bg: 'F1F5F9' }),
-      createCell("Grading Scale", { bold: true, bg: 'F1F5F9' }),
-      createCell("Count", { bold: true, bg: 'F1F5F9' }),
-      createCell("% Share", { bold: true, bg: 'F1F5F9' })
-    ]);
-    const descriptorRows = [
-      { label: "Advancing", scale: "90 - 100", count: overallStats.advancing, color: '4338CA' },
-      { label: "Benchmarking", scale: "80 - 89", count: overallStats.benchmarking, color: '15803D' },
-      { label: "Connecting", scale: "75 - 79", count: overallStats.connecting, color: '1D4ED8' },
-      { label: "Developing", scale: "65 - 74", count: overallStats.developing, color: 'B45309' },
-      { label: "Emerging", scale: "0 - 64", count: overallStats.emerging, color: 'B91C1C' }
-    ];
-    descriptorRows.forEach(d => {
-      const share = overallStats.takers > 0 ? `${((d.count / overallStats.takers) * 100).toFixed(1)}%` : "0.0%";
-      rows.push([
-        createCell(d.label, { bold: true, color: d.color }),
-        createCell(d.scale, { align: 'center' }),
-        createCell(d.count, { align: 'center', bold: true }),
-        createCell(share, { align: 'center' })
-      ]);
-    });
 
     // Signatures
     rows.push([]);
@@ -915,23 +895,11 @@ export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
 
             {/* Component Summary Legend */}
             <div className="legend-bar flex flex-wrap items-center justify-between gap-2 mb-2 px-2 py-1 bg-slate-100 border border-slate-300 text-[9px] font-bold">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-4">
                 <span>Components:</span>
-                <span className="text-blue-800">WW: {selectedSubject.wwWeight}%</span>
-                <span className="text-emerald-800">PT: {selectedSubject.ptWeight}%</span>
-                <span className="text-amber-800">QA: {selectedSubject.taWeight}%</span>
-              </div>
-              <div className="flex items-center gap-2 text-[8px] text-slate-700">
-                <span className="font-bold">Remarks / Descriptors:</span>
-                <span className="text-indigo-800">90–100: Advancing</span>
-                <span>•</span>
-                <span className="text-emerald-700">80–89: Benchmarking</span>
-                <span>•</span>
-                <span className="text-blue-700">75–79: Connecting</span>
-                <span>•</span>
-                <span className="text-amber-700">65–74: Developing</span>
-                <span>•</span>
-                <span className="text-rose-700">0–64: Emerging</span>
+                <span className="text-blue-800">Written Works (WW): {selectedSubject.wwWeight}%</span>
+                <span className="text-emerald-800">Performance Tasks (PT): {selectedSubject.ptWeight}%</span>
+                <span className="text-amber-800">Quarterly Assessment (QA): {selectedSubject.taWeight}%</span>
               </div>
               <div className="text-slate-600">
                 Total Enrolled: {sortedStudents.all.length} (Male: {sortedStudents.male.length}, Female: {sortedStudents.female.length})
@@ -1114,8 +1082,8 @@ export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
                         {/* Final Grades */}
                         <td className="border border-slate-900 p-1 font-mono">{row.initialGrade > 0 ? row.initialGrade.toFixed(2) : "-"}</td>
                         <td className="border border-slate-900 p-1 font-black bg-slate-100">{row.finalGrade > 0 ? row.finalGrade : "-"}</td>
-                        <td className={`border border-slate-900 p-1 font-bold ${getGradeDescriptorColor(row.finalGrade).text}`}>
-                          {row.finalGrade > 0 ? getGradeDescriptorRemark(row.finalGrade) : "-"}
+                        <td className={`border border-slate-900 p-1 font-extrabold ${isPassed ? 'text-emerald-700' : (row.finalGrade > 0 ? 'text-rose-700' : 'text-slate-400')}`}>
+                          {row.finalGrade > 0 ? getDescriptiveRemark(row.finalGrade) : "-"}
                         </td>
                       </tr>
                     );
@@ -1137,6 +1105,8 @@ export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
                   </tr>
                 ) : (
                   femaleStats.rows.map((row, idx) => {
+                    const isPassed = row.finalGrade >= 75;
+
                     return (
                       <tr key={row.student.id} className="student-row hover:bg-slate-50 text-center">
                         <td className="border border-slate-900 p-1">{idx + 1}</td>
@@ -1183,8 +1153,8 @@ export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
                         {/* Final Grades */}
                         <td className="border border-slate-900 p-1 font-mono">{row.initialGrade > 0 ? row.initialGrade.toFixed(2) : "-"}</td>
                         <td className="border border-slate-900 p-1 font-black bg-slate-100">{row.finalGrade > 0 ? row.finalGrade : "-"}</td>
-                        <td className={`border border-slate-900 p-1 font-bold ${getGradeDescriptorColor(row.finalGrade).text}`}>
-                          {row.finalGrade > 0 ? getGradeDescriptorRemark(row.finalGrade) : "-"}
+                        <td className={`border border-slate-900 p-1 font-extrabold ${isPassed ? 'text-emerald-700' : (row.finalGrade > 0 ? 'text-rose-700' : 'text-slate-400')}`}>
+                          {row.finalGrade > 0 ? getDescriptiveRemark(row.finalGrade) : "-"}
                         </td>
                       </tr>
                     );
@@ -1248,12 +1218,12 @@ export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
               {/* Proficiency Level Breakdown */}
               <div>
                 <h4 className="text-[9px] font-black uppercase tracking-wider mb-1 bg-slate-200 p-1 border border-slate-900 text-slate-800">
-                  II. Learning Area Grading Scale Distribution & Descriptors
+                  II. Learning Area Grading Scale Distribution
                 </h4>
                 <table className="w-full border-collapse border border-slate-900 text-[7.5px]">
                   <thead>
                     <tr className="bg-slate-100 font-bold uppercase text-center">
-                      <th className="border border-slate-900 p-1 text-left">Level of Proficiency / Descriptors</th>
+                      <th className="border border-slate-900 p-1 text-left">Level of Proficiency</th>
                       <th className="border border-slate-900 p-1">Grading Scale</th>
                       <th className="border border-slate-900 p-1">Count</th>
                       <th className="border border-slate-900 p-1">% Share</th>
@@ -1261,34 +1231,34 @@ export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
                   </thead>
                   <tbody>
                     <tr>
-                      <td className="border border-slate-900 p-1 font-bold text-indigo-800">Advancing</td>
+                      <td className="border border-slate-900 p-1 font-bold text-emerald-800">Advancing</td>
                       <td className="border border-slate-900 p-1 text-center font-mono">90 - 100</td>
-                      <td className="border border-slate-900 p-1 text-center font-bold text-indigo-800">{overallStats.advancing}</td>
-                      <td className="border border-slate-900 p-1 text-center font-semibold">
+                      <td className="border border-slate-900 p-1 text-center font-bold">{overallStats.advancing}</td>
+                      <td className="border border-slate-900 p-1 text-center">
                         {overallStats.takers > 0 ? ((overallStats.advancing / overallStats.takers) * 100).toFixed(1) : "0.0"}%
                       </td>
                     </tr>
                     <tr>
-                      <td className="border border-slate-900 p-1 font-bold text-emerald-800">Benchmarking</td>
+                      <td className="border border-slate-900 p-1 font-bold text-blue-800">Benchmarking</td>
                       <td className="border border-slate-900 p-1 text-center font-mono">80 - 89</td>
-                      <td className="border border-slate-900 p-1 text-center font-bold text-emerald-800">{overallStats.benchmarking}</td>
-                      <td className="border border-slate-900 p-1 text-center font-semibold">
+                      <td className="border border-slate-900 p-1 text-center font-bold">{overallStats.benchmarking}</td>
+                      <td className="border border-slate-900 p-1 text-center">
                         {overallStats.takers > 0 ? ((overallStats.benchmarking / overallStats.takers) * 100).toFixed(1) : "0.0"}%
                       </td>
                     </tr>
                     <tr>
-                      <td className="border border-slate-900 p-1 font-bold text-blue-800">Connecting</td>
+                      <td className="border border-slate-900 p-1 font-bold text-cyan-800">Connecting</td>
                       <td className="border border-slate-900 p-1 text-center font-mono">75 - 79</td>
-                      <td className="border border-slate-900 p-1 text-center font-bold text-blue-800">{overallStats.connecting}</td>
-                      <td className="border border-slate-900 p-1 text-center font-semibold">
+                      <td className="border border-slate-900 p-1 text-center font-bold">{overallStats.connecting}</td>
+                      <td className="border border-slate-900 p-1 text-center">
                         {overallStats.takers > 0 ? ((overallStats.connecting / overallStats.takers) * 100).toFixed(1) : "0.0"}%
                       </td>
                     </tr>
                     <tr>
                       <td className="border border-slate-900 p-1 font-bold text-amber-800">Developing</td>
                       <td className="border border-slate-900 p-1 text-center font-mono">65 - 74</td>
-                      <td className="border border-slate-900 p-1 text-center font-bold text-amber-700">{overallStats.developing}</td>
-                      <td className="border border-slate-900 p-1 text-center font-semibold text-amber-700">
+                      <td className="border border-slate-900 p-1 text-center font-bold">{overallStats.developing}</td>
+                      <td className="border border-slate-900 p-1 text-center">
                         {overallStats.takers > 0 ? ((overallStats.developing / overallStats.takers) * 100).toFixed(1) : "0.0"}%
                       </td>
                     </tr>
@@ -1296,7 +1266,7 @@ export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
                       <td className="border border-slate-900 p-1 font-bold text-rose-800">Emerging</td>
                       <td className="border border-slate-900 p-1 text-center font-mono">0 - 64</td>
                       <td className="border border-slate-900 p-1 text-center font-bold text-rose-700">{overallStats.emerging}</td>
-                      <td className="border border-slate-900 p-1 text-center font-semibold text-rose-700">
+                      <td className="border border-slate-900 p-1 text-center text-rose-700 font-bold">
                         {overallStats.takers > 0 ? ((overallStats.emerging / overallStats.takers) * 100).toFixed(1) : "0.0"}%
                       </td>
                     </tr>

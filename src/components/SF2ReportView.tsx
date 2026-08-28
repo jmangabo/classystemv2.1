@@ -21,7 +21,7 @@ const PHILIPPINE_HOLIDAYS = [
   '01-01', '04-09', '05-01', '06-12', '08-21', '11-01', '11-30', '12-25', '12-30'
 ];
 
-export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar, section, userId }) => {
+export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar, section, userId, isPrintMode, printMonthOverride }) => {
   const reportRef = useRef<HTMLDivElement>(null);
   const [headOfSchool, setHeadOfSchool] = useState<string>(section.headOfSchool || '');
   const [adviserName, setAdviserName] = useState<string>(section.adviserName || 'Adviser Name');
@@ -1989,7 +1989,8 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden flex flex-col gap-0">
       {/* Standardized Header */}
-      <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-6 print:hidden">
+      {!isPrintMode && (
+        <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-6 print:hidden">
         <div className="flex items-center gap-5">
            <div className="w-12 h-12 bg-indigo-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-200 border border-indigo-500">
               <Calendar size={24} />
@@ -2017,9 +2018,11 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
           </button>
         </div>
       </div>
+      )}
 
       {/* Selectors Area */}
-      <div className="p-6 border-b border-slate-100 flex flex-col gap-6 print:hidden">
+      {!isPrintMode && (
+        <div className="p-6 border-b border-slate-100 flex flex-col gap-6 print:hidden">
         <div className="flex flex-col lg:flex-row items-stretch gap-4 flex-wrap">
           {Array.from(new Set(monthsList.map(m => m.term))).sort().map(term => (
             <div key={term} className="flex flex-col gap-2 p-3 border border-slate-200 rounded-2xl bg-slate-50/50 flex-1 min-w-[200px]">
@@ -2056,6 +2059,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
           ))}
         </div>
       </div>
+      )}
 
       {!currentMonthData ? (
         <div className="p-12 text-center">

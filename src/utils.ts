@@ -24,28 +24,6 @@ export const formatStudentName = (student: Student | null | undefined) => {
   return (student.name || "").toUpperCase();
 };
 
-export const getGradeDescriptorRemark = (grade: number | string | null | undefined): string => {
-  if (grade === null || grade === undefined || grade === '') return '';
-  const numericGrade = typeof grade === 'string' ? parseFloat(grade) : grade;
-  if (isNaN(numericGrade) || numericGrade < 0) return '';
-  if (numericGrade >= 90) return 'Advancing';
-  if (numericGrade >= 80) return 'Benchmarking';
-  if (numericGrade >= 75) return 'Connecting';
-  if (numericGrade >= 65) return 'Developing';
-  return 'Emerging';
-};
-
-export const getGradeDescriptorColor = (grade: number | string | null | undefined): { text: string; bg: string; hex: string } => {
-  if (grade === null || grade === undefined || grade === '') return { text: 'text-slate-400', bg: 'bg-slate-50', hex: '64748B' };
-  const numericGrade = typeof grade === 'string' ? parseFloat(grade) : grade;
-  if (isNaN(numericGrade) || numericGrade <= 0) return { text: 'text-slate-400', bg: 'bg-slate-50', hex: '64748B' };
-  if (numericGrade >= 90) return { text: 'text-indigo-800 font-extrabold', bg: 'bg-indigo-50', hex: '4338CA' }; // Advancing
-  if (numericGrade >= 80) return { text: 'text-emerald-700 font-extrabold', bg: 'bg-emerald-50', hex: '15803D' }; // Benchmarking
-  if (numericGrade >= 75) return { text: 'text-blue-700 font-extrabold', bg: 'bg-blue-50', hex: '1D4ED8' }; // Connecting
-  if (numericGrade >= 65) return { text: 'text-amber-700 font-extrabold', bg: 'bg-amber-50', hex: 'B45309' }; // Developing
-  return { text: 'text-rose-700 font-extrabold', bg: 'bg-rose-50', hex: 'B91C1C' }; // Emerging
-};
-
 export function isTleSubject(name: string | undefined): boolean {
   if (!name) return false;
   const upper = name.toUpperCase();
