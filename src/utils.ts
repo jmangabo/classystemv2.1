@@ -186,3 +186,12 @@ export function printHTMLContent(html: string) {
   }
 }
 
+export function getEffectiveAdviserName(section?: any | null, userProfile?: any | null): string {
+  if (!section) return userProfile?.displayName || '---';
+  if (userProfile?.email && section.adviserEmail && userProfile.email.trim().toLowerCase() === section.adviserEmail.trim().toLowerCase() && userProfile.displayName) {
+    return userProfile.displayName;
+  }
+  return userProfile?.displayName || section.adviserName || '---';
+}
+
+

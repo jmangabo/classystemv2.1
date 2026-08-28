@@ -17,19 +17,31 @@ interface SF2ReportViewProps {
   userId?: string;
   isPrintMode?: boolean;
   printMonthOverride?: string;
+  currentUser?: any;
 }
 
 const PHILIPPINE_HOLIDAYS = [
   '01-01', '04-09', '05-01', '06-12', '08-21', '11-01', '11-30', '12-25', '12-30'
 ];
 
-export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar, section, userId, isPrintMode, printMonthOverride }) => {
+export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar, section, userId, isPrintMode, printMonthOverride, currentUser }) => {
   const reportRef = useRef<HTMLDivElement>(null);
   const [headOfSchool, setHeadOfSchool] = useState<string>(section.headOfSchool || '');
-  const [adviserName, setAdviserName] = useState<string>(section.adviserName || 'Adviser Name');
+  const [adviserName, setAdviserName] = useState<string>(() => {
+    if (currentUser?.email && section.adviserEmail && currentUser.email.trim().toLowerCase() === section.adviserEmail.trim().toLowerCase() && currentUser.displayName) {
+      return currentUser.displayName;
+    }
+    return currentUser?.displayName || section.adviserName || 'Adviser Name';
+  });
 
   useEffect(() => {
-     setAdviserName(section.adviserName || 'Adviser Name');
+     let initialName = section.adviserName || 'Adviser Name';
+     if (currentUser?.email && section.adviserEmail && currentUser.email.trim().toLowerCase() === section.adviserEmail.trim().toLowerCase() && currentUser.displayName) {
+       initialName = currentUser.displayName;
+     } else if (currentUser?.displayName && (currentUser?.role === 'teacher' || currentUser?.role === 'admin' || currentUser?.role === 'system_admin')) {
+       initialName = currentUser.displayName;
+     }
+     setAdviserName(initialName);
      setHeadOfSchool(section.headOfSchool || '');
      
      if (section.schoolId) {
@@ -45,10 +57,18 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
         });
      }
      
-     // We prioritize the adviserName stored in the section object.
-     // We no longer overwrite it with the account display name of the email owner
-     // to ensure that the specifically assigned teacher's name (e.g. "Analee R. Lumaday") is used.
-  }, [section.schoolId, section.adviserEmail, section.adviserName, section.headOfSchool]);
+     if (section.adviserEmail) {
+        const qUser = query(collection(db, "users"), where("email", "==", section.adviserEmail.trim().toLowerCase()));
+        getDocs(qUser).then(snap => {
+           if (!snap.empty) {
+              const uData = snap.docs[0].data();
+              if (uData.displayName) {
+                 setAdviserName(uData.displayName);
+              }
+           }
+        }).catch(err => console.error("Error fetching adviser user profile:", err));
+     }
+  }, [section.schoolId, section.adviserEmail, section.adviserName, section.headOfSchool, currentUser]);
 
   const [selectedMonthKey, setSelectedMonthKey] = useState<string>(() => {
     if (userId) {

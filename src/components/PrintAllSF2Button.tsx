@@ -284,6 +284,7 @@ export const PrintAllSF2Button: React.FC<PrintAllSF2ButtonProps> = ({ sections, 
                       students={data.students}
                       calendar={data.calendar}
                       userId={currentUser?.uid}
+                      currentUser={currentUser}
                       isPrintMode={true}
                       printMonthOverride={selectedMonth}
                     />

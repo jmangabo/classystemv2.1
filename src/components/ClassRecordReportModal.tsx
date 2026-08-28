@@ -250,13 +250,28 @@ export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
   const overallStats = useMemo(() => computeStats(sortedStudents.all), [sortedStudents.all, selectedSubject, activeTerm, refData]);
 
   const teacherName = useMemo(() => {
-    if (selectedSubject?.teacherEmail && currentUser?.email && selectedSubject.teacherEmail.trim().toLowerCase() === currentUser.email.trim().toLowerCase()) {
-      return currentUser?.name || currentUser?.displayName || currentUser?.email || "Subject Teacher";
+    if (selectedSubject?.teacherEmail && currentUser?.email && selectedSubject.teacherEmail.trim().toLowerCase() === currentUser.email.trim().toLowerCase() && currentUser?.displayName) {
+      return currentUser.displayName;
     }
-    return currentUser?.name || currentUser?.displayName || selectedSection?.adviserName || "Subject Teacher";
+    return currentUser?.displayName || currentUser?.name || selectedSection?.adviserName || "Subject Teacher";
   }, [selectedSubject, currentUser, selectedSection]);
 
-  const adviserName = selectedSection?.adviserName || "Class Adviser";
+  const [adviserName, setAdviserName] = useState<string>(() => {
+    if (currentUser?.email && selectedSection?.adviserEmail && currentUser.email.trim().toLowerCase() === selectedSection.adviserEmail.trim().toLowerCase() && currentUser?.displayName) {
+      return currentUser.displayName;
+    }
+    return selectedSection?.adviserName || currentUser?.displayName || "Class Adviser";
+  });
+
+  useEffect(() => {
+    if (currentUser?.email && selectedSection?.adviserEmail && currentUser.email.trim().toLowerCase() === selectedSection.adviserEmail.trim().toLowerCase() && currentUser?.displayName) {
+      setAdviserName(currentUser.displayName);
+    } else if (selectedSection?.adviserName) {
+      setAdviserName(selectedSection.adviserName);
+    } else if (currentUser?.displayName) {
+      setAdviserName(currentUser.displayName);
+    }
+  }, [selectedSection, currentUser]);
   const schoolHeadName = headOfSchool || selectedSection?.headOfSchool || "School Head / Principal";
 
   // Total columns span calculation

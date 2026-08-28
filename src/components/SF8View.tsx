@@ -828,7 +828,7 @@ export function SF8View({ section, students, userProfile, activeSchoolYear }: SF
                 <div className="hidden print:block mt-20 pt-10 border-t border-slate-100 text-black">
                   <div className="grid grid-cols-2 gap-24">
                     <div className="text-center">
-                      <p className="text-[11px] font-bold mb-1 uppercase underline decoration-2 underline-offset-4">{section?.adviserName || 'Adviser Name'}</p>
+                      <p className="text-[11px] font-bold mb-1 uppercase underline decoration-2 underline-offset-4">{(userProfile?.email && section?.adviserEmail && userProfile.email.trim().toLowerCase() === section.adviserEmail.trim().toLowerCase() && userProfile.displayName) ? userProfile.displayName : (userProfile?.displayName || section?.adviserName || 'Adviser Name')}</p>
                       <p className="text-[10px] font-black uppercase tracking-widest">Class Adviser</p>
                     </div>
                     <div className="text-center">
