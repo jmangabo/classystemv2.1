@@ -8,6 +8,7 @@ import {
   updateDoc,
   deleteDoc,
   deleteField,
+  writeBatch,
   query,
   where,
   onSnapshot
@@ -368,18 +369,22 @@ export const TleDashboardView: React.FC<TleDashboardViewProps> = ({
 
       // 3. Clear from section students' enrolledSubjectIds
       const studentsSnap = await getDocs(collection(db, "sections", sectionId, "students"));
-      await Promise.all(
-        studentsSnap.docs.map(async (stDoc) => {
-          const sData = stDoc.data();
-          const enrolled = sData.enrolledSubjectIds || [];
-          if (enrolled.includes(subjectId)) {
-            const nextIds = enrolled.filter((id: string) => id !== subjectId);
-            await updateDoc(doc(db, "sections", sectionId, "students", stDoc.id), {
-              enrolledSubjectIds: nextIds
-            });
-          }
-        })
-      );
+      const batch = writeBatch(db);
+      let batchCount = 0;
+      studentsSnap.docs.forEach((stDoc) => {
+        const sData = stDoc.data();
+        const enrolled = sData.enrolledSubjectIds || [];
+        if (enrolled.includes(subjectId)) {
+          const nextIds = enrolled.filter((id: string) => id !== subjectId);
+          batch.update(doc(db, "sections", sectionId, "students", stDoc.id), {
+            enrolledSubjectIds: nextIds
+          });
+          batchCount++;
+        }
+      });
+      if (batchCount > 0) {
+        await batch.commit();
+      }
 
       setSuccessMsg(`Successfully removed customized TLE specialization "${subjectName}" and updated student records.`);
       await refreshData();
