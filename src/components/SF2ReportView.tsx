@@ -2000,7 +2000,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
   if (!section) return null;
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden flex flex-col gap-0">
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden print:overflow-visible print:border-none print:shadow-none print:rounded-none print:block flex flex-col gap-0">
       {/* Standardized Header */}
       {!isPrintMode && (
         <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-6 print:hidden">

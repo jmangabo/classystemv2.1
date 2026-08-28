@@ -171,12 +171,6 @@ export const PrintAllSF2Button: React.FC<PrintAllSF2ButtonProps> = ({ sections, 
                   display: none !important;
                 }
                 .section-sf2-print-wrapper {
-                  page-break-before: always !important;
-                  page-break-after: always !important;
-                  break-before: page !important;
-                  break-after: page !important;
-                  page-break-inside: avoid !important;
-                  break-inside: avoid !important;
                   display: block !important;
                   width: 100% !important;
                   margin: 0 !important;
@@ -184,22 +178,22 @@ export const PrintAllSF2Button: React.FC<PrintAllSF2ButtonProps> = ({ sections, 
                   position: relative !important;
                   float: none !important;
                   clear: both !important;
+                  overflow: visible !important;
+                  page-break-inside: avoid !important;
+                  break-inside: avoid !important;
                 }
-                .section-sf2-print-wrapper:first-child,
-                .section-sf2-print-wrapper:first-of-type {
-                  page-break-before: auto !important;
-                  break-before: auto !important;
-                }
-                .section-sf2-print-wrapper:last-child,
-                .section-sf2-print-wrapper:last-of-type {
-                  page-break-after: auto !important;
-                  break-after: auto !important;
+                .section-sf2-print-wrapper + .section-sf2-print-wrapper,
+                .section-sf2-print-wrapper:not(:first-child) {
+                  page-break-before: always !important;
+                  break-before: page !important;
                 }
                 .sf2-report-container {
                   width: 100% !important;
                   border: none !important;
                   padding: 0 !important;
                   box-shadow: none !important;
+                  overflow: visible !important;
+                  display: block !important;
                   page-break-inside: avoid !important;
                   break-inside: avoid !important;
                 }
@@ -275,8 +269,6 @@ export const PrintAllSF2Button: React.FC<PrintAllSF2ButtonProps> = ({ sections, 
                     key={data.section.id} 
                     className="section-sf2-print-wrapper flex flex-col items-center w-full print:block"
                     style={{ 
-                      pageBreakAfter: index < allSectionsData.length - 1 ? 'always' : 'auto', 
-                      breakAfter: index < allSectionsData.length - 1 ? 'page' : 'auto',
                       pageBreakBefore: index > 0 ? 'always' : 'auto',
                       breakBefore: index > 0 ? 'page' : 'auto'
                     }}
