@@ -3854,7 +3854,6 @@ export default function App() {
          onCloseFeedback={() => setShowFeedbackModal(false)}
          user={userProfile}
          currentUser={currentUser}
-                      schoolCalendar={schoolCalendar}
          sections={sections}
          students={students}
        />;
@@ -10694,7 +10693,7 @@ function SectionsView({
       }
     });
 
-    // Process and write batches
+   // Process and write batches
                           for (const [secId, list] of Object.entries(grouped)) {
                             const batch = writeBatch(db);
                             list.forEach(learner => {
@@ -30933,4 +30932,3 @@ function AdminSchoolsView({
     </div>
   );
 }
-     

@@ -15,6 +15,8 @@ interface SF2ReportViewProps {
   calendar: any[];
   section: any;
   userId?: string;
+  isPrintMode?: boolean;
+  printMonthOverride?: string;
 }
 
 const PHILIPPINE_HOLIDAYS = [
@@ -54,6 +56,8 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
     }
     return '';
   });
+
+
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
 
   const handleExportPDF = async () => {
@@ -740,6 +744,15 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
       setSelectedMonthKey(monthsList[0].key);
     }
   }, [monthsList, selectedMonthKey]);
+
+  useEffect(() => {
+    if (printMonthOverride && monthsList.length > 0) {
+      const match = monthsList.find(m => m.month.toLowerCase() === printMonthOverride.toLowerCase());
+      if (match) {
+        setSelectedMonthKey(match.key);
+      }
+    }
+  }, [printMonthOverride, monthsList]);
 
   const monthIndices: { [key: string]: number } = {
     'January': 0, 'February': 1, 'March': 2, 'April': 3, 'May': 4, 'June': 5,
