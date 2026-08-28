@@ -2085,10 +2085,11 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
         <div className="w-full overflow-x-auto text-black print:overflow-visible p-8 print:p-0">
             <style dangerouslySetInnerHTML={{ __html: `
               @media print {
-                @page { size: landscape; margin: 0.75in 5mm 5mm 5mm; }
-                .sf2-report-container { width: 100% !important; border: none !important; padding: 0 !important; }
+                @page { size: landscape; margin: 0.5in 5mm 5mm 5mm; }
+                .sf2-report-container { width: 100% !important; border: none !important; padding: 0 !important; page-break-inside: avoid !important; break-inside: avoid !important; }
                 table { border-collapse: collapse !important; width: 100% !important; }
                 th, td { border: 1px solid black !important; }
+                tr { page-break-inside: avoid !important; break-inside: avoid !important; }
                 .no-print { display: none !important; }
                 body { background: white !important; }
               }

@@ -147,31 +147,65 @@ export const PrintAllSF2Button: React.FC<PrintAllSF2ButtonProps> = ({ sections, 
                   size: landscape;
                   margin: 5mm;
                 }
-                body {
+                html, body, #root, #root > div {
                   background: white !important;
                   color: black !important;
+                  height: auto !important;
+                  min-height: 0 !important;
+                  max-height: none !important;
+                  overflow: visible !important;
+                  position: static !important;
+                  display: block !important;
                 }
                 .print-modal-container {
-                  position: absolute !important;
-                  inset: 0 !important;
-                  background: white !important;
+                  position: static !important;
+                  inset: auto !important;
+                  width: 100% !important;
+                  height: auto !important;
                   overflow: visible !important;
-                  z-index: 9999 !important;
+                  background: white !important;
+                  z-index: auto !important;
+                  display: block !important;
                 }
                 .print-hidden {
                   display: none !important;
                 }
                 .section-sf2-print-wrapper {
+                  page-break-before: always !important;
                   page-break-after: always !important;
+                  break-before: page !important;
                   break-after: page !important;
+                  page-break-inside: avoid !important;
+                  break-inside: avoid !important;
                   display: block !important;
                   width: 100% !important;
+                  margin: 0 !important;
+                  padding: 0 !important;
+                  position: relative !important;
+                  float: none !important;
+                  clear: both !important;
+                }
+                .section-sf2-print-wrapper:first-child,
+                .section-sf2-print-wrapper:first-of-type {
+                  page-break-before: auto !important;
+                  break-before: auto !important;
+                }
+                .section-sf2-print-wrapper:last-child,
+                .section-sf2-print-wrapper:last-of-type {
+                  page-break-after: auto !important;
+                  break-after: auto !important;
                 }
                 .sf2-report-container {
                   width: 100% !important;
                   border: none !important;
                   padding: 0 !important;
                   box-shadow: none !important;
+                  page-break-inside: avoid !important;
+                  break-inside: avoid !important;
+                }
+                tr {
+                  page-break-inside: avoid !important;
+                  break-inside: avoid !important;
                 }
               }
             `}} />
@@ -240,7 +274,12 @@ export const PrintAllSF2Button: React.FC<PrintAllSF2ButtonProps> = ({ sections, 
                   <div 
                     key={data.section.id} 
                     className="section-sf2-print-wrapper flex flex-col items-center w-full print:block"
-                    style={{ pageBreakAfter: index < allSectionsData.length - 1 ? 'always' : 'auto', breakAfter: index < allSectionsData.length - 1 ? 'page' : 'auto' }}
+                    style={{ 
+                      pageBreakAfter: index < allSectionsData.length - 1 ? 'always' : 'auto', 
+                      breakAfter: index < allSectionsData.length - 1 ? 'page' : 'auto',
+                      pageBreakBefore: index > 0 ? 'always' : 'auto',
+                      breakBefore: index > 0 ? 'page' : 'auto'
+                    }}
                   >
                     <div className="text-center mb-2 print-hidden">
                       <span className="px-4 py-1.5 bg-slate-900 text-indigo-300 rounded-full text-xs font-black uppercase tracking-widest shadow">
