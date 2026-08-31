@@ -1060,10 +1060,10 @@ export const SF4ReportView: React.FC<SF4ReportViewProps> = ({ schoolId, calendar
                             <p className="text-[10px] uppercase font-bold tracking-widest text-slate-500 mt-0.5">
                               Grade {item.gradeLevel} - {item.sectionName} • {item.student.sex || 'Unknown'}
                               {item.student.dropoutDate && (item.student.status === 'Dropped Out' || item.student.status === 'Transferred Out') && (
-                                <span className="ml-2 text-indigo-600">• {new Date(item.student.dropoutDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}{item.student.dropoutReason ? ` - ${item.student.dropoutReason}` : ''}</span>
+                                <span className="ml-2 text-indigo-600">• {((d) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(item.student.dropoutDate)(undefined, { month: 'short', day: 'numeric' })}{item.student.dropoutReason ? ` - ${item.student.dropoutReason}` : ''}</span>
                               )}
                               {item.student.dateOfFirstAttendance && (selectedCategory === 'transIn' || selectedCategory === 'late') && (
-                                <span className="ml-2 text-emerald-600">• FOA: {new Date(item.student.dateOfFirstAttendance).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+                                <span className="ml-2 text-emerald-600">• FOA: {((d) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(item.student.dateOfFirstAttendance)(undefined, { month: 'short', day: 'numeric' })}</span>
                               )}
                             </p>
                           </div>

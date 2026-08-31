@@ -145,7 +145,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
           const dropYear = parseInt(dParts[0]);
           const dropMonth = parseInt(dParts[1]) - 1;
           if (currentMonthData.year === dropYear && monthIndices[currentMonthData.month] === dropMonth) {
-            remarksText = `D/O: ${new Date(student.dropoutDate!).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+            remarksText = `D/O: ${((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(student.dropoutDate!)(undefined, { month: 'short', day: 'numeric' })}`;
           }
         }
       } else if (student.status === 'Transferred Out') {
@@ -201,7 +201,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
           const dropYear = parseInt(dParts[0]);
           const dropMonth = parseInt(dParts[1]) - 1;
           if (currentMonthData.year === dropYear && monthIndices[currentMonthData.month] === dropMonth) {
-            remarksText = `D/O: ${new Date(student.dropoutDate!).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+            remarksText = `D/O: ${((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(student.dropoutDate!)(undefined, { month: 'short', day: 'numeric' })}`;
           }
         }
       } else if (student.status === 'Transferred Out') {
@@ -1311,7 +1311,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
           const dropYear = parseInt(dParts[0]);
           const dropMonth = parseInt(dParts[1]) - 1;
           if (currentMonthData!.year === dropYear && monthIndices[currentMonthData!.month] === dropMonth) {
-            remarksText = `D/O: ${new Date(s.dropoutDate!).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+            remarksText = `D/O: ${((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(s.dropoutDate!)(undefined, { month: 'short', day: 'numeric' })}`;
           }
         }
       } else if (s.status === 'Transferred Out') {
@@ -1374,7 +1374,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
           const dropYear = parseInt(dParts[0]);
           const dropMonth = parseInt(dParts[1]) - 1;
           if (currentMonthData!.year === dropYear && monthIndices[currentMonthData!.month] === dropMonth) {
-            remarksText = `D/O: ${new Date(s.dropoutDate!).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+            remarksText = `D/O: ${((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(s.dropoutDate!)(undefined, { month: 'short', day: 'numeric' })}`;
           }
         }
       } else if (s.status === 'Transferred Out') {
@@ -1904,7 +1904,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
               const dropYear = parseInt(dParts[0]);
               const dropMonth = parseInt(dParts[1]) - 1;
               if (currentMonthData!.year === dropYear && monthIndices[currentMonthData!.month] === dropMonth) {
-                return <span className="text-red-700">D/O: {new Date(student.dropoutDate!).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>;
+                return <span className="text-red-700">D/O: {((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(student.dropoutDate!)(undefined, { month: 'short', day: 'numeric' })}</span>;
               }
             }
             return null;
@@ -1915,7 +1915,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
               const dropYear = parseInt(dParts[0]);
               const dropMonth = parseInt(dParts[1]) - 1;
               if (currentMonthData!.year === dropYear && monthIndices[currentMonthData!.month] === dropMonth) {
-                return <span className="text-blue-700">T/O: {new Date(student.dropoutDate!).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>;
+                return <span className="text-blue-700">T/O: {((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(student.dropoutDate!)(undefined, { month: 'short', day: 'numeric' })}</span>;
               }
             }
             return null;
@@ -1926,7 +1926,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
               const foaYear = parseInt(foaParts[0]);
               const foaMonth = parseInt(foaParts[1]) - 1;
               if (currentMonthData!.year === foaYear && monthIndices[currentMonthData!.month] === foaMonth) {
-                return <span className="text-emerald-700">T/I: {new Date(student.dateOfFirstAttendance!).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>;
+                return <span className="text-emerald-700">T/I: {((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(student.dateOfFirstAttendance!)(undefined, { month: 'short', day: 'numeric' })}</span>;
               }
             }
             return null;
@@ -1985,7 +1985,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
               const dropYear = parseInt(dParts[0]);
               const dropMonth = parseInt(dParts[1]) - 1;
               if (currentMonthData.year === dropYear && monthIndices[currentMonthData.month] === dropMonth) {
-                return <span className="text-red-700">DROPPED: {new Date(student.dropoutDate!).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}{student.dropoutReason ? ` - ${student.dropoutReason}` : ''}</span>;
+                return <span className="text-red-700">DROPPED: {((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(student.dropoutDate!)(undefined, { month: 'short', day: 'numeric' })}{student.dropoutReason ? ` - ${student.dropoutReason}` : ''}</span>;
               }
             }
             return null;
@@ -1996,7 +1996,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
               const dropYear = parseInt(dParts[0]);
               const dropMonth = parseInt(dParts[1]) - 1;
               if (currentMonthData.year === dropYear && monthIndices[currentMonthData.month] === dropMonth) {
-                return <span className="text-blue-700">T/O: {new Date(student.dropoutDate!).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}{student.dropoutReason ? ` - ${student.dropoutReason}` : ''}</span>;
+                return <span className="text-blue-700">T/O: {((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(student.dropoutDate!)(undefined, { month: 'short', day: 'numeric' })}{student.dropoutReason ? ` - ${student.dropoutReason}` : ''}</span>;
               }
             }
             return null;
@@ -2007,7 +2007,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
               const foaYear = parseInt(foaParts[0]);
               const foaMonth = parseInt(foaParts[1]) - 1;
               if (currentMonthData.year === foaYear && monthIndices[currentMonthData.month] === foaMonth) {
-                return <span className="text-emerald-700">T/I: {new Date(student.dateOfFirstAttendance!).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>;
+                return <span className="text-emerald-700">T/I: {((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(student.dateOfFirstAttendance!)(undefined, { month: 'short', day: 'numeric' })}</span>;
               }
             }
             return null;

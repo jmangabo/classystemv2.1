@@ -146,7 +146,7 @@ export const AralDashboard: React.FC<AralDashboardProps> = ({
     return Object.entries(datesMap)
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([date, d]) => ({
-        date: new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        date: ((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(date)('en-US', { month: 'short', day: 'numeric' }),
         'Attendance Rate': Math.round((d.present / d.total) * 100)
       }));
   }, [learners]);

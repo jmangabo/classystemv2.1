@@ -793,12 +793,12 @@ export function SF8View({ section, students, userProfile, activeSchoolYear }: SF
                                  <p className="text-sm font-black text-slate-900 uppercase tracking-tight print:text-black">{formatStudentName(item.student)}</p>
                                  {item.student.status === 'Dropped Out' && (
                                    <span className="text-[8px] bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded-full font-black uppercase tracking-widest w-fit mt-1">
-                                     Dropped {item.student.dropoutDate ? `(${new Date(item.student.dropoutDate).toLocaleDateString(undefined, { month: 'short' })})` : ''}{item.student.dropoutReason ? ` - ${item.student.dropoutReason}` : ''}
+                                     Dropped {item.student.dropoutDate ? `(${((d) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(item.student.dropoutDate)(undefined, { month: 'short' })})` : ''}{item.student.dropoutReason ? ` - ${item.student.dropoutReason}` : ''}
                                    </span>
                                  )}
                                  {item.student.status === 'Transferred Out' && (
                                    <span className="text-[8px] bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded-full font-black uppercase tracking-widest w-fit mt-1">
-                                     Transferred {item.student.dropoutDate ? `(${new Date(item.student.dropoutDate).toLocaleDateString(undefined, { month: 'short' })})` : ''}{item.student.dropoutReason ? ` - ${item.student.dropoutReason}` : ''}
+                                     Transferred {item.student.dropoutDate ? `(${((d) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(item.student.dropoutDate)(undefined, { month: 'short' })})` : ''}{item.student.dropoutReason ? ` - ${item.student.dropoutReason}` : ''}
                                    </span>
                                  )}
                                </div>

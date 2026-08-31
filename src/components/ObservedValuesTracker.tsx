@@ -76,12 +76,12 @@ export const ObservedValuesTracker: React.FC<ObservedValuesTrackerProps> = ({ st
                       <span>{formatStudentName(student)}</span>
                       {student.status === 'Dropped Out' && (
                         <span className="text-[8px] bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded-full font-black uppercase tracking-widest self-start">
-                          Dropped {student.dropoutDate ? `(${new Date(student.dropoutDate).toLocaleDateString(undefined, { month: 'short' })})` : ''}
+                          Dropped {student.dropoutDate ? `(${((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(student.dropoutDate)(undefined, { month: 'short' })})` : ''}
                         </span>
                       )}
                       {student.status === 'Transferred Out' && (
                         <span className="text-[8px] bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded-full font-black uppercase tracking-widest self-start">
-                          Transferred {student.dropoutDate ? `(${new Date(student.dropoutDate).toLocaleDateString(undefined, { month: 'short' })})` : ''}
+                          Transferred {student.dropoutDate ? `(${((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(student.dropoutDate)(undefined, { month: 'short' })})` : ''}
                         </span>
                       )}
                     </div>

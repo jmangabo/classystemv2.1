@@ -1,7 +1,4 @@
-/**
-
- * SPDX-License-Identifier: Apache-2.0
- */
+import { HelperStudentModal, EnrollmentView, DeleteConfirmModal, EditStudentModal, StudentAttendanceModal, TeacherSetupModal, PTAView, RolesSecurityView, SchoolProfileSettingsView } from "./RestoredViews.js";
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
@@ -7906,7 +7903,7 @@ function SectionsView({
             const dbSecName = (sec.name || "").trim().toLowerCase();
             const csvGrade = (l.gradeLevel || "").trim();
             const dbGrade = String(sec.gradeLevel || "").trim();
-            return csvSecName === dbSecName && (csvGrade === "" || csvGrade === dbGrade);
+                              return csvSecName === dbSecName && (csvGrade === "" || csvGrade === dbGrade);
           });
           if (hasSection) {
             validIndices.add(idx);
@@ -10670,6 +10667,7 @@ function SectionsView({
                         setIsUploadingDashboard(true);
                         try {
                           // Group learners by matched section
+                            // Group learners by matched section
                           const grouped: { [sectionId: string]: any[] } = {};
                           selection.forEach(learner => {
                             const matchedSec = sections.find(sec => {
@@ -10680,11 +10678,7 @@ function SectionsView({
                               return csvSecName === dbSecName && (csvGrade === "" || csvGrade === dbGrade);
                             });
                         if (matchedSec) {
-        if (!grouped[matchedSec.id]) {
-          grouped[matchedSec.id] = [];
-        }
-
-        grouped[matchedSec.id].push({
+     grouped[matchedSec.id].push({
           ...learner,
           sectionId: matchedSec.id,
           sectionName: matchedSec.name,
@@ -25346,104 +25340,298 @@ function SummarySheetView({
 function TransferFacilityView({ 
   students, 
   onToggleStatus,
-  onViewReport
+  onViewReport,
+  onViewBlankReport
 }: { 
   students: Student[], 
-  onToggleStatus?: (studentId: string, status: 'Active' | 'Transferred Out' | 'Dropped Out') => void,
-  onViewReport?: (s: Student) => void
+  onToggleStatus?: (
+    studentId: string, 
+    status: 'Active' | 'Transferred Out' | 'Dropped Out'
+  ) => void,
+  onViewReport?: (s: Student) => void,
+  onViewBlankReport?: (s: Student) => void
 }) {
-  const inactiveStudents = students.filter(s => s.status === 'Transferred Out' || s.status === 'Dropped Out');
+  const [filter, setFilter] = useState<'all' | 'transferred' | 'dropped'>('all');
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const inactiveStudents = students.filter(
+    s => s.status === 'Transferred Out' || s.status === 'Dropped Out'
+  );
+
+  const transferredStudents = inactiveStudents.filter(
+    s => s.status === 'Transferred Out'
+  );
+
+  const droppedStudents = inactiveStudents.filter(
+    s => s.status === 'Dropped Out'
+  );
+
+  const filteredStudents = inactiveStudents.filter(student => {
+    const matchesFilter =
+      filter === 'all' ||
+      (filter === 'transferred' && student.status === 'Transferred Out') ||
+      (filter === 'dropped' && student.status === 'Dropped Out');
+
+    const search = searchTerm.trim().toLowerCase();
+
+    const matchesSearch =
+      !search ||
+      formatStudentName(student).toLowerCase().includes(search) ||
+      (student.lrn || '').toLowerCase().includes(search);
+
+    return matchesFilter && matchesSearch;
+  });
+
+  const getStatusColor = (status?: string) => {
+    if (status === 'Transferred Out') {
+      return 'bg-rose-50 text-rose-700 border-rose-200';
+    }
+
+    return 'bg-orange-50 text-orange-700 border-orange-200';
+  };
+
+  const getStatusLabel = (status?: string) => {
+    return status === 'Transferred Out'
+      ? 'Transferred Out'
+      : 'Dropped Out';
+  };
 
   return (
     <div className="flex flex-col bg-slate-50 min-h-screen">
-      <div className="bg-white border-b border-slate-200 shadow-xl overflow-hidden mb-0">
-        <div className="p-8 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-6 print:hidden border-b border-slate-100">
-          <div className="flex items-center gap-5">
-            <div className="w-12 h-12 bg-rose-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-rose-200 border border-rose-500">
+
+      {/* Header */}
+      <div className="bg-white border-b border-slate-200 shadow-sm">
+        <div className="p-6 md:p-8 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-rose-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-rose-200">
               <Share2 size={24} />
             </div>
+
             <div>
-              <h2 className="text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-3">
+              <h2 className="text-2xl font-bold text-slate-800 tracking-tight">
                 Transfer & Dropout Facility
-                <span className="bg-rose-100 text-rose-600 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest whitespace-nowrap">
-                   {inactiveStudents.length} Learners (M: {inactiveStudents.filter(s => s.sex?.toLowerCase() === 'male' || s.sex?.toLowerCase() === 'm').length}, F: {inactiveStudents.filter(s => s.sex?.toLowerCase() === 'female' || s.sex?.toLowerCase() === 'f').length})
-                </span>
               </h2>
-              <p className="text-slate-500 text-xs font-medium uppercase tracking-widest mt-0.5">Manage and track learners who have transferred out</p>
+
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-widest mt-1">
+                Manage learners who transferred out or dropped out
+              </p>
             </div>
+          </div>
+
+          {/* Summary */}
+          <div className="flex flex-wrap gap-2">
+
+            <button
+              onClick={() => setFilter('all')}
+              className={`px-4 py-2 rounded-xl border text-xs font-black uppercase tracking-wide transition-all ${
+                filter === 'all'
+                  ? 'bg-slate-900 text-white border-slate-900'
+                  : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+              }`}
+            >
+              All ({inactiveStudents.length})
+            </button>
+
+            <button
+              onClick={() => setFilter('transferred')}
+              className={`px-4 py-2 rounded-xl border text-xs font-black uppercase tracking-wide transition-all ${
+                filter === 'transferred'
+                  ? 'bg-rose-600 text-white border-rose-600'
+                  : 'bg-white text-slate-500 border-slate-200 hover:bg-rose-50'
+              }`}
+            >
+              Transferred ({transferredStudents.length})
+            </button>
+
+            <button
+              onClick={() => setFilter('dropped')}
+              className={`px-4 py-2 rounded-xl border text-xs font-black uppercase tracking-wide transition-all ${
+                filter === 'dropped'
+                  ? 'bg-orange-600 text-white border-orange-600'
+                  : 'bg-white text-slate-500 border-slate-200 hover:bg-orange-50'
+              }`}
+            >
+              Dropped ({droppedStudents.length})
+            </button>
+
           </div>
         </div>
       </div>
 
-      <div className="p-6 md:p-12">
-        {inactiveStudents.length === 0 ? (
-          <div className="bg-white rounded-3xl p-20 flex flex-col items-center justify-center border-2 border-dashed border-slate-100 shadow-sm">
-            <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-6">
-              <Share2 size={40} className="text-slate-200" />
+      {/* Content */}
+      <div className="p-6 md:p-10">
+
+        {/* Search */}
+        {inactiveStudents.length > 0 && (
+          <div className="mb-6">
+            <div className="relative max-w-xl">
+              <Search
+                size={18}
+                className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+              />
+
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search learner name or LRN..."
+                className="w-full h-12 pl-11 pr-4 bg-white border border-slate-200 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 text-sm font-semibold text-slate-700"
+              />
             </div>
-            <h3 className="text-lg font-bold text-slate-900 mb-1">No Inactive Learners</h3>
-            <p className="text-slate-500 text-sm max-w-sm text-center">There are currently no learners marked as "Transferred Out" or "Dropped Out".</p>
+          </div>
+        )}
+
+        {/* Empty */}
+        {filteredStudents.length === 0 ? (
+          <div className="bg-white rounded-3xl p-16 flex flex-col items-center justify-center border-2 border-dashed border-slate-200">
+
+            <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-5">
+              <Share2 size={38} className="text-slate-300" />
+            </div>
+
+            <h3 className="text-lg font-bold text-slate-900 mb-1">
+              {inactiveStudents.length === 0
+                ? 'No Inactive Learners'
+                : 'No Matching Learners'}
+            </h3>
+
+            <p className="text-slate-500 text-sm text-center max-w-md">
+              {inactiveStudents.length === 0
+                ? 'There are currently no learners marked as Transferred Out or Dropped Out.'
+                : 'Try changing the filter or search term.'}
+            </p>
+
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {inactiveStudents.map(student => (
-              <motion.div 
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+
+            {filteredStudents.map(student => (
+
+              <motion.div
                 layout
                 key={student.id}
-                className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 hover:shadow-xl hover:border-slate-200 transition-all group"
+                className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 hover:shadow-xl hover:border-slate-200 transition-all"
               >
-                <div className="flex justify-between items-start mb-6">
-                  <div className="flex items-center gap-4">
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-lg ${student.sex === 'Female' ? 'bg-indigo-50 text-indigo-600' : 'bg-blue-50 text-blue-600'}`}>
+
+                {/* Learner Header */}
+                <div className="flex justify-between items-start gap-4 mb-6">
+
+                  <div className="flex items-center gap-4 min-w-0">
+
+                    <div
+                      className={`w-14 h-14 shrink-0 rounded-2xl flex items-center justify-center font-black text-lg ${
+                        student.sex?.toLowerCase() === 'female'
+                          ? 'bg-indigo-50 text-indigo-600'
+                          : 'bg-blue-50 text-blue-600'
+                      }`}
+                    >
                       {formatStudentName(student).charAt(0)}
                     </div>
-                    <div>
-                      <h3 className="font-bold text-slate-900 group-hover:text-rose-600 transition-colors line-through">{formatStudentName(student)}</h3>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">LRN: {student.lrn}</p>
-                      {student.dropoutDate && (
-                        <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest mt-1 flex items-center gap-1.5 bg-rose-50 px-2 py-0.5 rounded-lg w-fit">
-                          <Calendar size={10} strokeWidth={3} />
-                          {new Date(student.dropoutDate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
-                        </p>
-                      )}
+
+                    <div className="min-w-0">
+                      <h3 className="font-bold text-slate-900 truncate">
+                        {formatStudentName(student)}
+                      </h3>
+
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">
+                        LRN: {student.lrn || 'N/A'}
+                      </p>
                     </div>
+
                   </div>
-                  <div className={`px-2 py-1 ${student.status === 'Transferred Out' ? 'bg-rose-50 text-rose-600' : 'bg-orange-50 text-orange-600'} text-[8px] font-black uppercase tracking-widest rounded-lg`}>
-                    {student.status === 'Transferred Out' ? 'Transferred' : 'Dropped Out'}
-                  </div>
+
+                  <span
+                    className={`shrink-0 px-2.5 py-1 rounded-lg border text-[9px] font-black uppercase tracking-widest ${getStatusColor(student.status)}`}
+                  >
+                    {getStatusLabel(student.status)}
+                  </span>
+
                 </div>
 
-                <div className="pt-6 border-t border-slate-50 flex gap-2">
+                {/* Details */}
+                <div className="space-y-3 mb-6">
+
+                  {student.dropoutDate && (
+                    <div className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
+                        {student.status === 'Transferred Out'
+                          ? 'Transfer Date'
+                          : 'Last Attendance'}
+                      </span>
+
+                      <span className="text-xs font-bold text-slate-700">
+                        {new Date(student.dropoutDate).toLocaleDateString(
+                          undefined,
+                          {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric'
+                          }
+                        )}
+                      </span>
+                    </div>
+                  )}
+
+                  {student.dropoutReason && (
+                    <div className="bg-slate-50 rounded-xl px-3 py-3">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">
+                        {student.status === 'Transferred Out'
+                          ? 'Destination / Reason'
+                          : 'Reason'}
+                      </p>
+
+                      <p className="text-xs font-semibold text-slate-700 leading-relaxed">
+                        {student.dropoutReason}
+                      </p>
+                    </div>
+                  )}
+
+                </div>
+
+                {/* Actions */}
+                <div className="pt-5 border-t border-slate-100 flex gap-2">
+
                   {onViewReport && (
-                    <button 
+                    <button
                       onClick={() => onViewReport(student)}
-                      className="px-4 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-[10px] uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition-all flex items-center justify-center"
+                      className="w-11 h-10 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded-xl hover:bg-indigo-600 hover:text-white transition-all flex items-center justify-center"
                       title="View SF 9"
                     >
                       <FileText size={16} />
                     </button>
                   )}
+
                   {onViewBlankReport && (
-                    <button 
+                    <button
                       onClick={() => onViewBlankReport(student)}
-                      className="px-4 bg-slate-50 text-slate-600 rounded-xl font-bold text-[10px] uppercase tracking-widest hover:bg-slate-600 hover:text-white transition-all flex items-center justify-center"
+                      className="w-11 h-10 bg-slate-50 text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-600 hover:text-white transition-all flex items-center justify-center"
                       title="View Blank SF 9"
                     >
                       <Download size={16} />
                     </button>
                   )}
+
                   <button
-                    onClick={() => onToggleStatus?.(student.id, 'Active')}
+                    onClick={() =>
+                      onToggleStatus?.(student.id, 'Active')
+                    }
                     className="flex-1 h-10 bg-slate-900 text-white rounded-xl font-bold text-[10px] uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
                   >
                     <RefreshCw size={14} />
                     Restore to Active
                   </button>
+
                 </div>
+
               </motion.div>
+
             ))}
+
           </div>
         )}
+
       </div>
     </div>
   );

@@ -793,7 +793,7 @@ export const AralForms: React.FC<AralFormsProps> = ({
                   <tr className="bg-slate-50 text-slate-400 font-bold uppercase tracking-wider border-b border-slate-100">
                     <th className="p-3">Learner Name</th>
                     {["2026-07-01", "2026-07-02", "2026-07-03", "2026-07-06", "2026-07-07"].map(d => (
-                      <th key={d} className="p-3 text-center">{new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</th>
+                      <th key={d} className="p-3 text-center">{((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(d)('en-US', { month: 'short', day: 'numeric' })}</th>
                     ))}
                     <th className="p-3 text-center">Auto attendance %</th>
                   </tr>
