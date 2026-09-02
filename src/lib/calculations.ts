@@ -1,4 +1,5 @@
-import { Student, Subject, TermNumber, DEFAULT_TERM_DATA } from "../types";
+import { Student, Subject, TermNumber } from '../types';
+import { DEFAULT_TERM_DATA } from '../constants';
 
 export const transmuteGrade = (initial: number): number => {
   if (initial >= 99.50) return 100;
@@ -44,9 +45,10 @@ export const transmuteGrade = (initial: number): number => {
   return 60;
 };
 
-export const calculateGrade = (student: Student, subject: Subject, term: TermNumber) => {
+export const calculateGrade = (student: Student, subject: Subject, term: TermNumber, refStudent?: Student) => {
   const data = student.grades?.[subject.id]?.[term] || JSON.parse(JSON.stringify(DEFAULT_TERM_DATA));
-  
+  const refData = refStudent?.grades?.[subject.id]?.[term] || data;
+
   if (data.manualFinalGrade && data.manualFinalGrade > 0) {
      return {
         ww: { total: 0, ps: 0, ws: 0, max: 0 },
@@ -60,8 +62,24 @@ export const calculateGrade = (student: Student, subject: Subject, term: TermNum
 
   const calc = (cat: string, weight: number) => {
     const component = (data[cat as keyof typeof data] || { scores: [], maxScores: [] }) as any;
-    const total = (component.scores || []).reduce((a: number, b: number) => a + b, 0);
-    const max = (component.maxScores || []).reduce((a: number, b: number) => a + b, 0);
+    const refComponent = (refData[cat as keyof typeof refData] || { scores: [], maxScores: [] }) as any;
+
+    const compMax = component.maxScores || [];
+    const refMax = refComponent.maxScores || [];
+    const maxScoresArr: any[] = (compMax.some((x: any) => Number(x) > 0) ? compMax : refMax) || [];
+    const scoresArr: any[] = component.scores || [];
+
+    let total = 0;
+    let max = 0;
+    const len = Math.max(maxScoresArr.length, scoresArr.length);
+    for (let i = 0; i < len; i++) {
+      const hps = Number(maxScoresArr[i]) || 0;
+      if (hps > 0) {
+        max += hps;
+        total += Number(scoresArr[i]) || 0;
+      }
+    }
+
     const ps = max === 0 ? 0 : (total / max) * 100;
     const ws = ps * (weight / 100);
     return { total, ps, ws, max };
@@ -69,46 +87,30 @@ export const calculateGrade = (student: Student, subject: Subject, term: TermNum
 
   const ww = calc('writtenWorks', subject.wwWeight);
   const pt = calc('performanceTasks', subject.ptWeight);
-  
+
   const s1 = Number(data.summativeTests?.scores?.[0]) || 0;
-  const m1 = Number(data.summativeTests?.maxScores?.[0]) || 0;
+  const m1 = Number(refData.summativeTests?.maxScores?.[0]) || Number(data.summativeTests?.maxScores?.[0]) || 0;
+
   const s2 = Number(data.summativeTests?.scores?.[1]) || 0;
-  const m2 = Number(data.summativeTests?.maxScores?.[1]) || 0;
+  const m2 = Number(refData.summativeTests?.maxScores?.[1]) || Number(data.summativeTests?.maxScores?.[1]) || 0;
+
   const se = Number(data.termExam?.score) || 0;
-  const me = Number(data.termExam?.maxScore) || 0;
-
-  const ps1 = m1 === 0 ? 0 : (s1 / m1) * 100;
-  const ps2 = m2 === 0 ? 0 : (s2 / m2) * 100;
-  const pse = me === 0 ? 0 : (se / me) * 100;
-
-  let totalActiveWeight = 0;
-  let weightedPsSum = 0;
-
-  if (m1 > 0) {
-    totalActiveWeight += 30;
-    weightedPsSum += 30 * ps1;
-  }
-  if (m2 > 0) {
-    totalActiveWeight += 30;
-    weightedPsSum += 30 * ps2;
-  }
-  if (me > 0) {
-    totalActiveWeight += 40;
-    weightedPsSum += 40 * pse;
-  }
+  const me = Number(refData.termExam?.maxScore) || Number(data.termExam?.maxScore) || 0;
 
   const taTotal = s1 + s2 + se;
   const taMax = m1 + m2 + me;
-  const taPs = totalActiveWeight === 0 ? 0 : (weightedPsSum / totalActiveWeight);
+  const taPs = taMax === 0 ? 0 : (taTotal / taMax) * 100;
   const taWs = taPs * (subject.taWeight / 100);
 
   const rawGrade = ww.ws + pt.ws + taWs;
-  const transmutedValue = transmuteGrade(rawGrade);
-  const computedFinal = subject.isZeroBasedGrading ? Math.round(rawGrade) : transmutedValue;
+  const transmutedGrade = transmuteGrade(rawGrade);
+  const computedFinal = subject.isZeroBasedGrading ? Math.round(rawGrade) : transmutedGrade;
+
   const hasData = ww.max > 0 || pt.max > 0 || taMax > 0;
 
   return {
-    ww, pt, 
+    ww,
+    pt,
     ta: { total: taTotal, ps: taPs, ws: taWs, max: taMax },
     initial: rawGrade,
     final: hasData ? computedFinal : 0,

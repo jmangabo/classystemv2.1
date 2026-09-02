@@ -1066,9 +1066,8 @@ export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
                           </td>
                         ))}
                         <td className="border border-slate-900 p-1 font-bold bg-blue-50/50">{row.wwTotal > 0 ? row.wwTotal : (row.hasData ? "0" : "-")}</td>
-                        <td className="border border-slate-900 p-1">{row.wwPs > 0 ? row.wwPs.toFixed(2) : "-"}</td>
-                        <td className="border border-slate-900 p-1 font-semibold">{row.wwWs > 0 ? row.wwWs.toFixed(2) : "-"}</td>
-
+                        <td className="border border-slate-900 p-1">{row.hasData || row.wwTotal > 0 ? row.wwPs.toFixed(2) : "-"}</td>
+                        <td className="border border-slate-900 p-1 font-semibold">{row.hasData || row.wwTotal > 0 ? row.wwWs.toFixed(2) : "-"}</td>
                         {/* PT Active columns */}
                         {activePTIndices.map(i => (
                           <td key={`m-pt-${i}`} className="border border-slate-900 p-1">
@@ -1076,9 +1075,8 @@ export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
                           </td>
                         ))}
                         <td className="border border-slate-900 p-1 font-bold bg-emerald-50/50">{row.ptTotal > 0 ? row.ptTotal : (row.hasData ? "0" : "-")}</td>
-                        <td className="border border-slate-900 p-1">{row.ptPs > 0 ? row.ptPs.toFixed(2) : "-"}</td>
-                        <td className="border border-slate-900 p-1 font-semibold">{row.ptWs > 0 ? row.ptWs.toFixed(2) : "-"}</td>
-
+                        <td className="border border-slate-900 p-1">{row.hasData || row.ptTotal > 0 ? row.ptPs.toFixed(2) : "-"}</td>
+                        <td className="border border-slate-900 p-1 font-semibold">{row.hasData || row.ptTotal > 0 ? row.ptWs.toFixed(2) : "-"}</td>
                         {/* QA Active columns */}
                         {activeSTIndices.map(i => (
                           <td key={`m-st-${i}`} className="border border-slate-900 p-1">
@@ -1091,8 +1089,8 @@ export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
                           </td>
                         )}
                         <td className="border border-slate-900 p-1 font-bold bg-amber-50/50">{row.qaScore > 0 ? row.qaScore : (row.hasData ? "0" : "-")}</td>
-                        <td className="border border-slate-900 p-1">{row.qaPs > 0 ? row.qaPs.toFixed(2) : "-"}</td>
-                        <td className="border border-slate-900 p-1 font-semibold">{row.qaWs > 0 ? row.qaWs.toFixed(2) : "-"}</td>
+                        <td className="border border-slate-900 p-1">{row.hasData || row.qaScore > 0 ? row.qaPs.toFixed(2) : "-"}</td>
+                        <td className="border border-slate-900 p-1 font-semibold">{row.hasData || row.qaScore > 0 ? row.qaWs.toFixed(2) : "-"}</td>
 
                         {/* Final Grades */}
                         <td className="border border-slate-900 p-1 font-mono">{row.initialGrade > 0 ? row.initialGrade.toFixed(2) : "-"}</td>
@@ -1137,8 +1135,8 @@ export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
                           </td>
                         ))}
                         <td className="border border-slate-900 p-1 font-bold bg-blue-50/50">{row.wwTotal > 0 ? row.wwTotal : (row.hasData ? "0" : "-")}</td>
-                        <td className="border border-slate-900 p-1">{row.wwPs > 0 ? row.wwPs.toFixed(2) : "-"}</td>
-                        <td className="border border-slate-900 p-1 font-semibold">{row.wwWs > 0 ? row.wwWs.toFixed(2) : "-"}</td>
+                        <td className="border border-slate-900 p-1">{row.hasData || row.wwTotal > 0 ? row.wwPs.toFixed(2) : "-"}</td>
+                        <td className="border border-slate-900 p-1 font-semibold">{row.hasData || row.wwTotal > 0 ? row.wwWs.toFixed(2) : "-"}</td>
 
                         {/* PT Active columns */}
                         {activePTIndices.map(i => (
@@ -1147,8 +1145,8 @@ export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
                           </td>
                         ))}
                         <td className="border border-slate-900 p-1 font-bold bg-emerald-50/50">{row.ptTotal > 0 ? row.ptTotal : (row.hasData ? "0" : "-")}</td>
-                        <td className="border border-slate-900 p-1">{row.ptPs > 0 ? row.ptPs.toFixed(2) : "-"}</td>
-                        <td className="border border-slate-900 p-1 font-semibold">{row.ptWs > 0 ? row.ptWs.toFixed(2) : "-"}</td>
+                        <td className="border border-slate-900 p-1">{row.hasData || row.ptTotal > 0 ? row.ptPs.toFixed(2) : "-"}</td>
+                        <td className="border border-slate-900 p-1 font-semibold">{row.hasData || row.ptTotal > 0 ? row.ptWs.toFixed(2) : "-"}</td>
 
                         {/* QA Active columns */}
                         {activeSTIndices.map(i => (
@@ -1162,8 +1160,8 @@ export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
                           </td>
                         )}
                         <td className="border border-slate-900 p-1 font-bold bg-amber-50/50">{row.qaScore > 0 ? row.qaScore : (row.hasData ? "0" : "-")}</td>
-                        <td className="border border-slate-900 p-1">{row.qaPs > 0 ? row.qaPs.toFixed(2) : "-"}</td>
-                        <td className="border border-slate-900 p-1 font-semibold">{row.qaWs > 0 ? row.qaWs.toFixed(2) : "-"}</td>
+                        <td className="border border-slate-900 p-1">{row.hasData || row.qaScore > 0 ? row.qaPs.toFixed(2) : "-"}</td>
+                        <td className="border border-slate-900 p-1 font-semibold">{row.hasData || row.qaScore > 0 ? row.qaWs.toFixed(2) : "-"}</td>
 
                         {/* Final Grades */}
                         <td className="border border-slate-900 p-1 font-mono">{row.initialGrade > 0 ? row.initialGrade.toFixed(2) : "-"}</td>

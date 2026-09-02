@@ -191,12 +191,7 @@ function u1e() {
   O.constructor = R, w(O, C.prototype), O.isPureReactComponent = !0;
   var V = Array.isArray;
   function re() {}
-  var D = {
-      H: null,
-      A: null,
-      T: null,
-      S: null
-    },
+  var D = (React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE || React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED || { H: null, A: null, T: null, S: null }),
     _ = Object.prototype.hasOwnProperty;
   function j(ee, G, H) {
     var X = H.ref;
@@ -428,7 +423,7 @@ function u1e() {
   }, ki.useCallback = function (ee, G) {
     return D.H.useCallback(ee, G);
   }, ki.useContext = function (ee) {
-    return D.H.useContext(ee);
+    return (React && React.useContext) ? React.useContext(ee) : (D && D.H ? D.H.useContext(ee) : null);
   }, ki.useDebugValue = function () {}, ki.useDeferredValue = function (ee, G) {
     return D.H.useDeferredValue(ee, G);
   }, ki.useEffect = function (ee, G) {
@@ -36131,7 +36126,7 @@ var Roe = () => ({});
 */
 class yd {
   constructor(e) {
-    this.uid = e;
+    this.uid = e != null ? e : null;
   }
   isAuthenticated() {
     return this.uid != null;
@@ -36140,9 +36135,13 @@ class yd {
     return this.isAuthenticated() ? "uid:" + this.uid : "anonymous-user";
   }
   isEqual(e) {
-    return e.uid === this.uid;
+    return !!(e && typeof e === "object" && e.uid === this.uid);
   }
 }
+yd.UNAUTHENTICATED = new yd(null);
+yd.FIRST_PARTY = new yd("first-party-uid");
+yd.MOCK_USER = new yd("mock-user-uid");
+yd.GOOGLE_CREDENTIALS = new yd("google-credentials-uid");
 /**
 * @license
 * Copyright 2017 Google LLC
@@ -36351,7 +36350,7 @@ class Qoe {
   }
   invalidateToken() {}
   start(e, r) {
-    e.enqueueRetryable(() => r(yd.UNAUTHENTICATED));
+    e.enqueueRetryable(() => r(yd.UNAUTHENTICATED || new yd(null)));
   }
   shutdown() {}
 }
@@ -42581,8 +42580,7 @@ class uI {
     this.userId = e, this.serializer = r, this.indexManager = n, this.referenceDelegate = s, this.Zn = {};
   }
   static wt(e, r, n, s) {
-    Ba(e.uid !== "", 64387);
-    const a = e.isAuthenticated() ? e.uid : "";
+    const a = (e && typeof e.isAuthenticated === "function" && e.isAuthenticated()) ? (e.uid || "") : "";
     return new uI(a, r, n, s);
   }
   checkEmpty(e) {
@@ -45486,8 +45484,8 @@ class x8 {
     return JSON.parse(e);
   }
   async mo(e) {
-    if (e.user.uid === this.currentUser.uid) return this.syncEngine.bo(e.batchId, e.state, e.error);
-    es(Sp, `Ignoring mutation for non-active user ${e.user.uid}`);
+    if (e && e.user && this.currentUser && e.user.uid === this.currentUser.uid) return this.syncEngine.bo(e.batchId, e.state, e.error);
+    es(Sp, "Ignoring mutation for non-active user " + (e && e.user ? e.user.uid : "unknown"));
   }
   po(e) {
     return this.syncEngine.Do(e.targetId, e.state, e.error);
@@ -48016,9 +48014,10 @@ class oIe {
 const h1 = "FirestoreClient";
 class lIe {
   constructor(e, r, n, s, a) {
-    this.authCredentials = e, this.appCheckCredentials = r, this.asyncQueue = n, this._databaseInfo = s, this.user = yd.UNAUTHENTICATED, this.clientId = X_.newId(), this.authCredentialListener = () => Promise.resolve(), this.appCheckCredentialListener = () => Promise.resolve(), this._uninitializedComponentsProvider = a, this.authCredentials.start(n, async o => {
-      es(h1, "Received user=", o.uid), await this.authCredentialListener(o), this.user = o;
-    }), this.appCheckCredentials.start(n, o => (es(h1, "Received new app check token=", o), this.appCheckCredentialListener(o, this.user)));
+    this.authCredentials = e, this.appCheckCredentials = r, this.asyncQueue = n, this._databaseInfo = s, this.user = yd.UNAUTHENTICATED, this.clientId = X_.newId(), this.authCredentialListener = () => Promise.resolve(), this.appCheckCredentialListener = () => Promise.resolve(), this._uninitializedComponentsProvider = a, this.authCredentials.start(n, async (o = yd.UNAUTHENTICATED) => {
+      const _user = o || yd.UNAUTHENTICATED || new yd(null);
+      es(h1, "Received user=", _user ? _user.uid : null), await this.authCredentialListener(_user), this.user = _user;
+    }), this.appCheckCredentials.start(n, o => (es(h1, "Received new app check token=", o), this.appCheckCredentialListener(o, this.user || yd.UNAUTHENTICATED)));
   }
   get configuration() {
     return {
@@ -51637,20 +51636,21 @@ const P6e = {
       hasData: !0
     };
     const s = (G, H) => {
-        const X = n[G] || {
-            scores: [],
-            maxScores: []
-          },
-          W = (X.scores || []).reduce((Ce, oe) => Ce + oe, 0),
-          se = (X.maxScores || []).reduce((Ce, oe) => Ce + oe, 0),
-          de = se === 0 ? 0 : W / se * 100,
+        const X = n[G] || { scores: [], maxScores: [] },
+          scoresArr = X.scores || [],
+          maxScoresArr = X.maxScores || [];
+        let W = 0, se = 0;
+        const len = Math.max(scoresArr.length, maxScoresArr.length);
+        for (let i = 0; i < len; i++) {
+          const hps = Number(maxScoresArr[i]) || 0;
+          if (hps > 0) {
+            se += hps;
+            W += Number(scoresArr[i]) || 0;
+          }
+        }
+        const de = se === 0 ? 0 : (W / se) * 100,
           Se = de * (H / 100);
-        return {
-          total: W,
-          ps: de,
-          ws: Se,
-          max: se
-        };
+        return { total: W, ps: de, ws: Se, max: se };
       },
       a = s("writtenWorks", e.wwWeight),
       o = s("performanceTasks", e.ptWeight),
@@ -51663,12 +51663,9 @@ const P6e = {
       b = c === 0 ? 0 : l / c * 100,
       N = u === 0 ? 0 : A / u * 100,
       w = x === 0 ? 0 : f / x * 100;
-    let E = 0,
-      C = 0;
-    c > 0 && (E += 30, C += 30 * b), u > 0 && (E += 30, C += 30 * N), x > 0 && (E += 40, C += 40 * w);
     const I = l + A + f,
       R = c + u + x,
-      O = E === 0 ? 0 : C / E,
+      O = R === 0 ? 0 : (I / R) * 100,
       V = O * (e.taWeight / 100),
       re = a.ws + o.ws + V,
       D = M6e(re),
@@ -74223,20 +74220,21 @@ const Cmt = t => t >= 99.5 ? 100 : t >= 97.5 ? 99 : t >= 96 ? 98 : t >= 95 ? 97 
       hasData: !0
     };
     const s = (G, H) => {
-        const X = n[G] || {
-            scores: [],
-            maxScores: []
-          },
-          W = (X.scores || []).reduce((Ce, oe) => Ce + (Number(oe) || 0), 0),
-          se = (X.maxScores || []).reduce((Ce, oe) => Ce + (Number(oe) || 0), 0),
-          de = se === 0 ? 0 : W / se * 100,
+        const X = n[G] || { scores: [], maxScores: [] },
+          scoresArr = X.scores || [],
+          maxScoresArr = X.maxScores || [];
+        let W = 0, se = 0;
+        const len = Math.max(scoresArr.length, maxScoresArr.length);
+        for (let i = 0; i < len; i++) {
+          const hps = Number(maxScoresArr[i]) || 0;
+          if (hps > 0) {
+            se += hps;
+            W += Number(scoresArr[i]) || 0;
+          }
+        }
+        const de = se === 0 ? 0 : (W / se) * 100,
           Se = de * (H / 100);
-        return {
-          total: W,
-          ps: de,
-          ws: Se,
-          max: se
-        };
+        return { total: W, ps: de, ws: Se, max: se };
       },
       a = s("writtenWorks", e.wwWeight),
       o = s("performanceTasks", e.ptWeight),
@@ -74249,12 +74247,9 @@ const Cmt = t => t >= 99.5 ? 100 : t >= 97.5 ? 99 : t >= 96 ? 98 : t >= 95 ? 97 
       b = c === 0 ? 0 : l / c * 100,
       N = u === 0 ? 0 : A / u * 100,
       w = x === 0 ? 0 : f / x * 100;
-    let E = 0,
-      C = 0;
-    c > 0 && (E += 30, C += 30 * b), u > 0 && (E += 30, C += 30 * N), x > 0 && (E += 40, C += 40 * w);
     const I = l + A + f,
       R = c + u + x,
-      O = E === 0 ? 0 : C / E,
+      O = R === 0 ? 0 : (I / R) * 100,
       V = O * (e.taWeight / 100),
       re = a.ws + o.ws + V,
       D = Cmt(re),
@@ -86940,7 +86935,7 @@ function Mmt({
                   }), ze && i.jsx("span", {
                     className: "text-[9px] text-slate-400 dark:text-slate-500 mt-0.5 select-none",
                     title: "Weighted score (30% of category)",
-                    children: ((Number((zr = (kr = wr.summativeTests) == null ? void 0 : kr.scores) == null ? void 0 : zr[Re]) || 0) / We * 30).toFixed(1)
+                    children: ((Number((zr = (kr = wr.summativeTests) == null ? void 0 : kr.scores) == null ? void 0 : zr[Re]) || 0) / We * 100).toFixed(1) + "%"
                   })]
                 })
               }, `st-${Re}`);
@@ -86952,7 +86947,7 @@ function Mmt({
                   We = Re > 0,
                   ze = !We || fr || Se || W || se,
                   Vt = Number((wt = wr.termExam) == null ? void 0 : wt.score) || 0,
-                  Wt = We ? Vt / Re * 40 : 0;
+                  Wt = We ? (Vt / Re * 100).toFixed(1) + "%" : "-";
                 return i.jsxs("div", {
                   className: "flex flex-col items-center justify-center",
                   children: [i.jsx("input", {
@@ -95316,7 +95311,7 @@ function $mt({
                           }), xe > 0 && i.jsxs("span", {
                             className: "text-[10px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100",
                             title: "Weighted Score (30% of category)",
-                            children: ["WS: ", (te / xe * 30).toFixed(1)]
+                            children: ["PS: ", (te / xe * 100).toFixed(1) + "%"]
                           })]
                         })]
                       });
@@ -95343,7 +95338,7 @@ function $mt({
                           }), xe > 0 && i.jsxs("span", {
                             className: "text-[10px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100",
                             title: "Weighted Score (30% of category)",
-                            children: ["WS: ", (te / xe * 30).toFixed(1)]
+                            children: ["PS: ", (te / xe * 100).toFixed(1) + "%"]
                           })]
                         })]
                       });
@@ -95370,7 +95365,7 @@ function $mt({
                           }), xe > 0 && i.jsxs("span", {
                             className: "text-[10px] font-bold text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded border border-indigo-200",
                             title: "Weighted Score (40% of category)",
-                            children: ["WS: ", (te / xe * 40).toFixed(1)]
+                            children: ["PS: ", (te / xe * 100).toFixed(1) + "%"]
                           })]
                         })]
                       });
