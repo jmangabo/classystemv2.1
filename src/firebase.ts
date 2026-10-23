@@ -26,15 +26,18 @@ const app = initializeApp(firebaseConfig);
 // Enable stable connectivity settings with extremely robust fallback mechanisms for sandboxed iFrame restrictions
 let dbInstance;
 try {
-  // Initialize Firestore with default settings which auto-detect persistent/IndexedDB cache and fall back gracefully to memory
-  dbInstance = initializeFirestore(app, { experimentalForceLongPolling: true }, firebaseConfig.firestoreDatabaseId);
+  dbInstance = initializeFirestore(app, {
+    localCache: memoryLocalCache(),
+    experimentalForceLongPolling: true
+  }, firebaseConfig.firestoreDatabaseId);
 } catch (error: any) {
   if (error.message?.includes('already been initialized') || error.code === 'failed-precondition') {
     dbInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId);
   } else {
     try {
       dbInstance = initializeFirestore(app, {
-        localCache: memoryLocalCache(), experimentalForceLongPolling: true
+        localCache: memoryLocalCache(),
+        experimentalForceLongPolling: true
       }, firebaseConfig.firestoreDatabaseId);
     } catch (fallbackError: any) {
       dbInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId);

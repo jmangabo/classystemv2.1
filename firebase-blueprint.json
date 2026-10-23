@@ -392,6 +392,52 @@
         "status": { "type": "string" }
       },
       "required": ["studentId", "studentName", "lrn", "scanDate", "scanTime", "scanType", "timestamp"]
+    },
+    "ILAWLessonPlanRecord": {
+      "title": "ILAW Lesson Plan Record",
+      "description": "Stored lesson plan record for a teacher",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string" },
+        "ownerEmail": { "type": "string" },
+        "plan": { "type": "object" },
+        "term": { "type": "string" },
+        "week": { "type": "string" },
+        "lessonTitle": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerUid", "plan", "term", "week"]
+    },
+    "ILAWLessonPlanSubmission": {
+      "title": "ILAW Lesson Plan Submission",
+      "description": "Workflow submission for lesson plan approval",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "plan": { "type": "object" },
+        "teacherName": { "type": "string" },
+        "teacherEmail": { "type": "string" },
+        "submittedAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["pending", "approved", "returned"] },
+        "reviewerName": { "type": "string" },
+        "reviewedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["plan", "teacherEmail", "submittedAt", "status"]
+    },
+    "ILAWChangeRequest": {
+      "title": "ILAW Change Request",
+      "description": "Request to edit or delete an approved lesson plan",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "submissionId": { "type": "string" },
+        "type": { "type": "string", "enum": ["edit", "delete"] },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "planTitle": { "type": "string" },
+        "teacherEmail": { "type": "string" },
+        "requestedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["submissionId", "type", "status", "teacherEmail", "requestedAt"]
     }
   },
   "firestore": {
@@ -470,6 +516,22 @@
     "attendance_scan_logs/{logId}": {
       "schema": "AttendanceScanLog",
       "description": "Logs of barcode/QR scanning events for student time-in and time-out tracking"
+    },
+    "ilawLessonPlanRecords/{recordId}": {
+      "schema": "ILAWLessonPlanRecord",
+      "description": "Persistent teacher lesson plans"
+    },
+    "ilawLessonPlans/{planId}": {
+      "schema": "ILAWLessonPlanRecord",
+      "description": "General lesson plan storage"
+    },
+    "ilawLessonPlanSubmissions/{submissionId}": {
+      "schema": "ILAWLessonPlanSubmission",
+      "description": "Workflow submissions for approval"
+    },
+    "ilawLessonPlanChangeRequests/{requestId}": {
+      "schema": "ILAWChangeRequest",
+      "description": "Requests to modify approved lesson plans"
     }
   }
 }

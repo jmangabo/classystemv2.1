@@ -146,17 +146,39 @@ export const TleDashboardView: React.FC<TleDashboardViewProps> = ({
               ...doc.data()
             } as Student));
 
-            // Fetch subjects from section's sub-collection and merge assigned teachers
+            // Fetch subjects from the section's sub-collection.
+            // Also include subjects assigned to this section through
+            // section.globalSubjectIds. These global assignments must remain
+            // visible even when ZERO learners are enrolled in the subject.
             const subjectsSnap = await getDocs(collection(db, "sections", sec.id, "subjects"));
             const secTeachers = sec.subjectTeachers || {};
-            const subjectsInSec = subjectsSnap.docs.map(docSnap => {
+
+            const localSubjects = subjectsSnap.docs.map(docSnap => {
               const data = docSnap.data();
               return {
                 id: docSnap.id,
                 ...data,
+                _source: "section",
                 teacherEmail: secTeachers[docSnap.id] || data.teacherEmail || ""
               };
-            }) as Subject[];
+            }) as unknown as Subject[];
+
+            const globalIds = Array.isArray(sec.globalSubjectIds) ? sec.globalSubjectIds : [];
+            const localIds = new Set(localSubjects.map(s => s.id));
+
+            const globalAssignedSubjects = rootSubjects
+              .filter(globalSub => globalIds.includes(globalSub.id) && !localIds.has(globalSub.id))
+              .map(globalSub => ({
+                ...globalSub,
+                sectionId: sec.id,
+                _source: "global",
+                teacherEmail:
+                  secTeachers[globalSub.id] ||
+                  globalSub.teacherEmail ||
+                  ""
+              })) as Subject[];
+
+            const subjectsInSec = [...localSubjects, ...globalAssignedSubjects];
 
             sectionsWithSubjects[sec.id] = subjectsInSec;
 
@@ -358,12 +380,28 @@ export const TleDashboardView: React.FC<TleDashboardViewProps> = ({
     setSuccessMsg("");
     setErrorMsg("");
     try {
-      // 1. Delete individual subject document
-      await deleteDoc(doc(db, "sections", sectionId, "subjects", subjectId));
+      // Determine whether this TLE subject is stored locally in the section
+      // or assigned from the Global Subjects Directory.
+      const sectionRef = doc(db, "sections", sectionId);
+      const currentSection = g910Sections.find(s => s.id === sectionId);
+      const globalIds = Array.isArray(currentSection?.globalSubjectIds)
+        ? currentSection.globalSubjectIds
+        : [];
+      const isGlobalAssignment = globalIds.includes(subjectId);
 
-      // 2. Remove from parent section subjectTeachers map
-      const sectionDocRef = doc(db, "sections", sectionId);
-      await updateDoc(sectionDocRef, {
+      // 1. Remove the subject from its actual source.
+      if (isGlobalAssignment) {
+        // Do NOT delete the global_subjects document. Only remove its
+        // assignment from this section. Other sections may still use it.
+        await updateDoc(sectionRef, {
+          globalSubjectIds: globalIds.filter(id => id !== subjectId)
+        });
+      } else {
+        await deleteDoc(doc(db, "sections", sectionId, "subjects", subjectId));
+      }
+
+      // 2. Remove from parent section subjectTeachers map.
+      await updateDoc(sectionRef, {
         [`subjectTeachers.${subjectId}`]: deleteField()
       });
 
@@ -804,7 +842,12 @@ export const TleDashboardView: React.FC<TleDashboardViewProps> = ({
                                       <span className="w-1.5 h-1.5 rounded-full bg-indigo-600"></span>
                                       Grade {sec.gradeLevel} - {sec.name}
                                     </div>
-                                    <span className="text-[9px] text-slate-400 ml-3.5 tracking-wider font-semibold">Adv. {sec.adviserName || 'N/A'}</span>
+                                    <div className="flex items-center gap-2 ml-3.5">
+                                      <span className="text-[9px] text-slate-400 tracking-wider font-semibold">Adv. {sec.adviserName || 'N/A'}</span>
+                                      {(sub as any)._source === "global" && (
+                                        <span className="text-[8px] bg-violet-50 border border-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">Global Assigned</span>
+                                      )}
+                                    </div>
                                   </td>
 
                                   {/* Assigned Teacher Dropdown */}
@@ -838,7 +881,7 @@ export const TleDashboardView: React.FC<TleDashboardViewProps> = ({
                                         ? "bg-indigo-50 border border-indigo-100 text-indigo-700" 
                                         : "bg-amber-50 border border-amber-100 text-amber-700"
                                     }`}>
-                                      {enrolledCount} Learners
+                                      {enrolledCount === 0 ? "0 Learners — No Enrollment" : `${enrolledCount} Learner${enrolledCount === 1 ? "" : "s"}`}
                                     </span>
                                   </td>
 

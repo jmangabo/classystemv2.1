@@ -49,6 +49,7 @@ interface MonthlySummary {
 export const SF4ReportView: React.FC<SF4ReportViewProps> = ({ schoolId, calendar, globalSettings }) => {
   const [sections, setSections] = useState<Section[]>([]);
   const [school, setSchool] = useState<School | null>(null);
+  const [systemAdminName, setSystemAdminName] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [sectionStudents, setSectionStudents] = useState<{[sectionId: string]: Student[]}>({});
   const [selectedMonthKey, setSelectedMonthKey] = useState<string>('');
@@ -62,8 +63,32 @@ export const SF4ReportView: React.FC<SF4ReportViewProps> = ({ schoolId, calendar
         // Fetch school info
         const schoolQ = query(collection(db, 'schools'), where('schoolId', '==', schoolId));
         const schoolSnap = await getDocs(schoolQ);
+        let fetchedSchool: any = null;
         if (!schoolSnap.empty) {
-          setSchool(schoolSnap.docs[0].data() as School);
+          fetchedSchool = schoolSnap.docs[0].data();
+          setSchool(fetchedSchool as School);
+        }
+
+        // Resolve the System Admin's printed name from the users collection.
+        // The role/name field names vary between deployments, so support common variants.
+        try {
+          const usersSnap = await getDocs(query(collection(db, 'users')));
+          const users = usersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+          const normalize = (value: unknown) => String(value ?? '').trim().toLowerCase().replace(/[\s_-]+/g, ' ');
+          const admin = users.find(user => {
+            const roles = [user.role, user.userRole, user.accountType, user.position, ...(Array.isArray(user.roles) ? user.roles : [])]
+              .map(normalize);
+            return roles.some(role => role === 'system admin' || role === 'system administrator' || role.includes('system admin'));
+          });
+          const adminName = admin && (
+            admin.fullName || admin.displayName || admin.name || admin.completeName || admin.username ||
+            [admin.firstName || admin.firstname || admin.givenName, admin.middleName || admin.middlename, admin.lastName || admin.lastname || admin.surname]
+              .filter(Boolean).join(' ')
+          );
+          setSystemAdminName(String(adminName || '').trim());
+        } catch (adminLookupError) {
+          console.warn('Unable to resolve System Admin name for SF4 signature:', adminLookupError);
+          setSystemAdminName('');
         }
 
         // Fetch sections
@@ -91,6 +116,20 @@ export const SF4ReportView: React.FC<SF4ReportViewProps> = ({ schoolId, calendar
       fetchData();
     }
   }, [schoolId]);
+
+  const schoolHeadName = useMemo(() => {
+    const data = school as any;
+    if (!data) return '';
+    const directName = data.schoolHeadName || data.schoolHead || data.schoolHeadFullName ||
+      data.headOfSchool || data.headName || data.principalName || data.principal ||
+      data.schoolPrincipal || data.nameOfSchoolHead || data.schoolHeadFullname;
+    if (typeof directName === 'string' && directName.trim()) return directName.trim();
+    if (directName && typeof directName === 'object') {
+      const name = directName.fullName || directName.name || [directName.firstName, directName.middleName, directName.lastName].filter(Boolean).join(' ');
+      if (name) return String(name).trim();
+    }
+    return '';
+  }, [school]);
 
   const monthsList = useMemo(() => {
     if (!calendar || calendar.length === 0) return [];
@@ -173,7 +212,7 @@ export const SF4ReportView: React.FC<SF4ReportViewProps> = ({ schoolId, calendar
       // And were NOT yet dropped/transferred in PREVIOUS months
       const activeOrLaterStudents = students.filter(s => {
         // If dateOfFirstAttendance is missing, assume they started at the beginning of the school year
-        let joinedBeforeOrIn = true;
+        let joinedBeforeOrIn = Boolean(s.dateOfFirstAttendance);
         if (s.dateOfFirstAttendance) {
           const parts = s.dateOfFirstAttendance.split('-');
           if (parts.length >= 2) {
@@ -249,7 +288,7 @@ export const SF4ReportView: React.FC<SF4ReportViewProps> = ({ schoolId, calendar
         return students.filter(s => {
           const sSex = s.sex?.toLowerCase();
           const targetSex = gender.toLowerCase();
-          if (sSex !== targetSex) return false;
+          if (!((targetSex === 'male' && (sSex === 'male' || sSex === 'm')) || (targetSex === 'female' && (sSex === 'female' || sSex === 'f'))) ) return false;
           
           if (s.isTransferredIn !== true) return false;
           
@@ -275,7 +314,7 @@ export const SF4ReportView: React.FC<SF4ReportViewProps> = ({ schoolId, calendar
         return students.filter(s => {
           const sSex = s.sex?.toLowerCase();
           const targetSex = gender.toLowerCase();
-          if (sSex !== targetSex) return false;
+          if (!((targetSex === 'male' && (sSex === 'male' || sSex === 'm')) || (targetSex === 'female' && (sSex === 'female' || sSex === 'f'))) ) return false;
           
           if (s.isTransferredIn === true) return false;
           
@@ -302,29 +341,93 @@ export const SF4ReportView: React.FC<SF4ReportViewProps> = ({ schoolId, calendar
         }).length;
       };
 
-      // Attendance Calculation
-      const calendarEntry = calendar.find(c => 
-        c.month === currentMonthData.month && 
-        c.schoolYear === currentMonthData.schoolYear &&
-        (c.term || '1').toString() === currentMonthData.term
+      // Attendance Calculation — keep SF4 aligned with SF2.
+      // SF2 treats a calendar month as one report (not one report per term),
+      // merges dailyAttendance[Month], dailyAttendance[Month_term], and the
+      // selected month key, and counts actual present school-day cells.
+      const monthEntries = calendar
+        .filter(c => c.month === currentMonthData.month && c.schoolYear === section.schoolYear)
+        .sort((a, b) => (parseInt(a.term, 10) || 1) - (parseInt(b.term, 10) || 1));
+      const configuredSchoolDays = monthEntries.reduce(
+        (sum, entry) => sum + Math.max(0, Number.parseInt(String(entry.days ?? '0'), 10) || 0), 0
       );
-      const schoolDays = parseInt(calendarEntry?.days) || 0;
-
+      const daysInMonth = new Date(reportYear, reportMonthIndex + 1, 0).getDate();
+      const openingDate = monthEntries.length
+        ? Math.max(1, Math.min(...monthEntries.map(c => parseInt(c.openingDate || '1', 10) || 1)))
+        : 1;
+      const closingDate = monthEntries.length
+        ? Math.min(daysInMonth, Math.max(...monthEntries.map(c => parseInt(c.closingDate || String(daysInMonth), 10) || daysInMonth)))
+        : 0;
+      const localHolidays = new Set<number>();
+      monthEntries.forEach(entry => {
+        (Array.isArray(entry.localHolidays) ? entry.localHolidays : []).forEach((day: any) => {
+          const value = Number(day);
+          if (Number.isFinite(value)) localHolidays.add(value);
+        });
+      });
+      const PHILIPPINE_HOLIDAYS_SF2 = ['01-01', '04-09', '05-01', '06-12', '08-21', '11-01', '11-30', '12-25', '12-30'];
+      const validSchoolDates: string[] = [];
+      for (let day = openingDate; day <= closingDate; day++) {
+        const date = new Date(reportYear, reportMonthIndex, day);
+        const dateId = `${String(reportMonthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        if (date.getDay() === 0 || date.getDay() === 6) continue;
+        if (PHILIPPINE_HOLIDAYS_SF2.includes(dateId) || localHolidays.has(day)) continue;
+        validSchoolDates.push(`${reportYear}-${String(reportMonthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`);
+        if (configuredSchoolDays > 0 && validSchoolDates.length >= configuredSchoolDays) break;
+      }
+      const schoolDays = validSchoolDates.length;
+      const normalizeDateKey = (value: any): string | null => {
+        if (!value) return null;
+        if (typeof value === 'string') {
+          const match = value.trim().match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+          if (match) return `${match[1]}-${String(Number(match[2])).padStart(2, '0')}-${String(Number(match[3])).padStart(2, '0')}`;
+          const parsed = new Date(value);
+          if (!Number.isNaN(parsed.getTime())) return `${parsed.getFullYear()}-${String(parsed.getMonth()+1).padStart(2,'0')}-${String(parsed.getDate()).padStart(2,'0')}`;
+        }
+        if (typeof value?.toDate === 'function') return normalizeDateKey(value.toDate().toISOString());
+        if (value?.seconds != null) return normalizeDateKey(new Date(value.seconds * 1000).toISOString());
+        return null;
+      };
+      const monthDailyAttendance = (student: Student): Record<string, any> => {
+        const raw: any = (student as any).dailyAttendance || {};
+        const merged: Record<string, any> = {};
+        if (raw[currentMonthData.month] && typeof raw[currentMonthData.month] === 'object') Object.assign(merged, raw[currentMonthData.month]);
+        Object.keys(raw).forEach(key => {
+          if (key.startsWith(`${currentMonthData.month}_`) && raw[key] && typeof raw[key] === 'object') Object.assign(merged, raw[key]);
+        });
+        if (raw[selectedMonthKey] && typeof raw[selectedMonthKey] === 'object') Object.assign(merged, raw[selectedMonthKey]);
+        return merged;
+      };
+      const isPresentValue = (value: any) => value === true || value === 1 || value === '1' || value === 'present' || value === 'P';
+      const isRegisteredAtMonthEnd = (student: Student) => {
+        const status = String((student as any).status || '').trim();
+        if (status !== 'Dropped Out' && status !== 'Transferred Out') return true;
+        const exitDate = normalizeDateKey((student as any).dropoutDate);
+        if (!exitDate) return true;
+        return exitDate.slice(0, 7) > `${reportYear}-${String(reportMonthIndex + 1).padStart(2, '0')}`;
+      };
       const calcAvgAttendance = (genderStudents: Student[]) => {
-        if (schoolDays === 0 || genderStudents.length === 0) return 0;
+        if (schoolDays <= 0) return 0;
         let totalPresent = 0;
-        genderStudents.forEach(s => {
-           if (s.attendance && s.attendance[monthKey]) {
-             totalPresent += (s.attendance[monthKey].present || 0);
-           } else if (s.dailyAttendance && s.dailyAttendance[selectedMonthKey]) {
-             totalPresent += Object.values(s.dailyAttendance[selectedMonthKey]).filter(v => v === true).length;
-           } else if (s.attendance && s.attendance[currentMonthData.month]) {
-             totalPresent += (s.attendance[currentMonthData.month].present || 0);
-           }
+        genderStudents.forEach(student => {
+          if (!isRegisteredAtMonthEnd(student)) return;
+          const firstAttendance = normalizeDateKey((student as any).dateOfFirstAttendance);
+          const exitDate = normalizeDateKey((student as any).dropoutDate);
+          const daily = monthDailyAttendance(student);
+          Object.entries(daily).forEach(([dayKey, value]) => {
+            if (!isPresentValue(value)) return;
+            const day = Number(dayKey);
+            if (!Number.isInteger(day) || day < 1 || day > new Date(reportYear, reportMonthIndex + 1, 0).getDate()) return;
+            const dateKey = `${reportYear}-${String(reportMonthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            if (!validSchoolDates.includes(dateKey)) return;
+            if (firstAttendance && dateKey < firstAttendance) return;
+            // SF2 does not count attendance after a learner's exit date.
+            if (exitDate && (student.status === 'Dropped Out' || student.status === 'Transferred Out') && dateKey > exitDate) return;
+            totalPresent++;
+          });
         });
         return Math.round((totalPresent / schoolDays) * 100) / 100;
       };
-
       const mAvg = calcAvgAttendance(maleS);
       const fAvg = calcAvgAttendance(femaleS);
 
@@ -423,46 +526,84 @@ export const SF4ReportView: React.FC<SF4ReportViewProps> = ({ schoolId, calendar
   }, [selectedCategory, currentMonthData, sections, sectionStudents, monthsList]);
 
   const handlePrintNewWindow = () => {
-    const printContents = document.getElementById('sf4-print-card')?.innerHTML || document.querySelector('.print-card-sf4')?.innerHTML;
-    if (printContents) {
-      const htmlContent = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>School Form 4 (SF4) - Monthly Learner Movement and Attendance</title>
-          <style>
-            @page { size: landscape; margin: 8mm; }
-            body { font-family: sans-serif; padding: 0; margin: 0; color: #000; background: #fff; }
-            table { border-collapse: collapse; width: 100%; font-size: 6.5px; }
-            th, td { border: 1px solid black !important; padding: 2px !important; text-align: center; }
-            .print-card-sf4 { width: 277mm; margin: 0 auto; background: white; }
-            @media print {
-              .print-card-sf4 { width: 100% !important; margin: 0 !important; }
-            }
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          </style>
-        </head>
-        <body>
-          <div class="print-card-sf4">
-            ${printContents}
-          </div>
-          <script>
-            window.onload = function() {
-              setTimeout(function() {
-                window.onafterprint = function() { window.close(); };
-                window.onfocus = function() { setTimeout(function() { window.close(); }, 800); };
-                window.print();
-              }, 500);
-            };
-          </script>
-        </body>
-        </html>
-      `;
-      printHTMLContent(htmlContent);
-    } else {
+    const printCard = document.getElementById('sf4-print-card');
+    const printContents = printCard?.innerHTML || document.querySelector('.print-card-sf4')?.innerHTML;
+
+    if (!printContents) {
       window.print();
+      return;
     }
+
+    // Build a self-contained print document: the Tailwind styles from the app
+    // are not automatically available in a newly opened print window.
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>School Form 4 (SF4) - Monthly Learner Movement and Attendance</title>
+        <style>
+          @page { size: A4 landscape; margin: 3mm; }
+          * { box-sizing: border-box; }
+          html, body { width: 100%; margin: 0; padding: 0; background: #fff; color: #000; }
+          body { font-family: Arial, Helvetica, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          .print-card-sf4 { width: 100%; max-width: 100%; margin: 0; padding: 0; border: 0; box-shadow: none; overflow: visible; }
+          .print-card-sf4 > div:first-child { text-align: center; margin: 0 0 3mm; }
+          .print-card-sf4 h1 { margin: 0; font-size: 11pt; line-height: 1.15; font-weight: 800; text-transform: uppercase; }
+          .print-card-sf4 p { margin-top: 1mm; margin-bottom: 0; }
+          /* School and reporting-period details: four aligned columns. */
+          .print-card-sf4 > div:nth-child(2) { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); column-gap: 3mm; row-gap: 2mm; width: 100%; margin-bottom: 3mm; font-size: 7pt; line-height: 1.2; }
+          .print-card-sf4 > div:nth-child(2) > div { display: flex; min-width: 0; align-items: end; gap: 1mm; }
+          .print-card-sf4 > div:nth-child(2) > div:nth-child(5) { grid-column: span 2; }
+          .print-card-sf4 > div:nth-child(2) > div > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+          .print-card-sf4 table { width: 100% !important; max-width: 100% !important; border-collapse: collapse !important; table-layout: fixed !important; font-size: 5.6pt !important; line-height: 1.08 !important; }
+          .print-card-sf4 th, .print-card-sf4 td { border: 0.5pt solid #000 !important; padding: 1.1px 1px !important; text-align: center; vertical-align: middle; overflow-wrap: anywhere; word-break: normal; }
+          .print-card-sf4 th { font-weight: 700; }
+          .print-card-sf4 thead tr:first-child th:first-child { width: 12% !important; text-align: left; }
+          .print-card-sf4 thead tr:first-child th:nth-child(2) { width: 7.333% !important; }
+          .print-card-sf4 thead tr:first-child th:nth-child(3) { width: 14.667% !important; }
+          .print-card-sf4 thead tr:first-child th:nth-child(4), .print-card-sf4 thead tr:first-child th:nth-child(5), .print-card-sf4 thead tr:first-child th:nth-child(6) { width: 22% !important; }
+          .print-card-sf4 th:first-child, .print-card-sf4 td:first-child { text-align: left; white-space: normal !important; }
+          .print-card-sf4 thead tr:nth-child(2) th[colspan="3"] { width: 7.333% !important; }
+          .print-card-sf4 thead tr:nth-child(2) th[colspan="6"] { width: 14.667% !important; }
+          .print-card-sf4 thead tr:nth-child(3) th { width: 2.444% !important; }
+          .print-card-sf4 thead { display: table-header-group; }
+          .print-card-sf4 tfoot { display: table-row-group; }
+          .print-card-sf4 tr { break-inside: avoid; page-break-inside: avoid; }
+          .print-card-sf4 > div:last-child { display: grid; grid-template-columns: 1fr 1fr; gap: 12mm; margin-top: 7mm; font-size: 7pt; }
+          .print-card-sf4 > div:last-child > div { text-align: center; }
+          .print-card-sf4 > div:last-child > div > div { width: 48mm; max-width: 80%; margin: 0 auto; border-bottom: 0.5pt solid #000; }
+          /* Keep the on-screen PDF/print preview wide, not constrained to a fixed paper-width box. */
+          @media screen {
+            html, body { width: 100%; min-width: 0; margin: 0; padding: 0; }
+            body { padding: 8px; background: #e5e7eb; }
+            .print-card-sf4 { display: block; width: 100%; max-width: none; margin: 0; padding: 8px; background: white; }
+            .print-card-sf4 table { width: 100% !important; max-width: 100% !important; table-layout: fixed !important; }
+          }
+          @media print {
+            @page { size: A4 landscape; margin: 3mm; }
+            html, body { display: block !important; width: 100% !important; min-width: 0 !important; margin: 0 !important; padding: 0 !important; }
+            body { background: #fff !important; }
+            .print-card-sf4 { display: block !important; width: 100% !important; max-width: none !important; margin: 0 !important; padding: 0 !important; border: 0 !important; box-shadow: none !important; overflow: visible !important; }
+            .print-card-sf4 table { display: table !important; width: 100% !important; max-width: 100% !important; table-layout: fixed !important; }
+          }
+        </style>
+      </head>
+      <body>
+        <main class="print-card-sf4">${printContents}</main>
+        <script>
+          window.onload = function () {
+            setTimeout(function () {
+              window.focus();
+              window.print();
+            }, 300);
+          };
+        </script>
+      </body>
+      </html>
+    `;
+    printHTMLContent(htmlContent);
   };
 
   const handleExportExcel = () => {
@@ -522,7 +663,7 @@ export const SF4ReportView: React.FC<SF4ReportViewProps> = ({ schoolId, calendar
       const femaleCumulLate = row.femaleLatePrev + row.femaleLateMonth;
       const totalEnrolment = row.maleEnrolment + row.femaleEnrolment;
       const totalAvgAtt = row.maleAvgAttendance + row.femaleAvgAttendance;
-      const totalAttPct = totalEnrolment > 0 ? Math.round(((totalAvgAtt / totalEnrolment) * 100) * 100) / 100 : 0;
+      const totalAttPct = totalEnrolment > 0 ? totalAvgAtt / totalEnrolment : 0;
 
       exportData.push(padRow([
         `Gr. ${row.gradeLevel} - ${row.sectionName}`,
@@ -543,7 +684,7 @@ export const SF4ReportView: React.FC<SF4ReportViewProps> = ({ schoolId, calendar
         maleCumulTO, femaleCumulTO, maleCumulTO + femaleCumulTO,
         row.maleTransInPrev + row.maleLatePrev, row.femaleTransInPrev + row.femaleLatePrev, row.maleTransInPrev + row.maleLatePrev + row.femaleTransInPrev + row.femaleLatePrev,
         row.maleTransInMonth + row.maleLateMonth, row.femaleTransInMonth + row.femaleLateMonth, row.maleTransInMonth + row.maleLateMonth + row.femaleTransInMonth + row.femaleLateMonth,
-        maleCumulTI + maleCumulLate, femaleCumulTI + femaleCumulLate, maleCumulTI + maleCumulLate + femaleCumulTI + maleCumulLate + femaleCumulLate
+        maleCumulTI + maleCumulLate, femaleCumulTI + femaleCumulLate, maleCumulTI + maleCumulLate + femaleCumulTI + femaleCumulLate
       ]));
     });
 
@@ -755,16 +896,16 @@ export const SF4ReportView: React.FC<SF4ReportViewProps> = ({ schoolId, calendar
           No data available for the selected month.
         </div>
       ) : (
-        <div className="p-8 overflow-x-auto text-black">
+        <div className="p-8 overflow-x-auto text-black print:p-0 print:overflow-visible">
           <style dangerouslySetInnerHTML={{ __html: `
             @media print {
-              @page { size: landscape; margin: 10mm; }
+              @page { size: A4 landscape; margin: 5mm; }
               body { background: white !important; }
               .print-hidden { display: none !important; }
             }
           `}} />
           
-          <div id="sf4-print-area" className="max-w-[1200px] mx-auto bg-white p-8 border border-slate-100 rounded-3xl print:border-none print:p-0">
+          <div id="sf4-print-area" className="w-full max-w-none mx-0 bg-white p-8 border border-slate-100 rounded-3xl print:w-full print:max-w-none print:mx-0 print:border-none print:p-0 print:rounded-none">
             <div className="text-center mb-8">
               <h1 className="text-xl font-black uppercase">School Form 4 (SF4)</h1>
               <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Monthly Learner Movement and Attendance Report</p>
@@ -1003,13 +1144,13 @@ export const SF4ReportView: React.FC<SF4ReportViewProps> = ({ schoolId, calendar
             <div className="mt-12 grid grid-cols-2 gap-12 text-[11px] font-bold">
               <div className="text-center space-y-8">
                 <p>Prepared by:</p>
-                <div className="border-b border-slate-900 mx-auto w-64 pb-1"></div>
-                <p className="uppercase text-[9px] text-slate-500">(Signature over Printed Name of School Head)</p>
+                <div className="border-b border-slate-900 mx-auto w-64 min-h-[20px] pb-1">{systemAdminName || ' '}</div>
+                <p className="uppercase text-[9px] text-slate-500">System Admin</p>
               </div>
               <div className="text-center space-y-8">
                 <p>Submitted to:</p>
-                <div className="border-b border-slate-900 mx-auto w-64 pb-1"></div>
-                <p className="uppercase text-[9px] text-slate-500">(Signature over Printed Name of District/Division Official)</p>
+                <div className="border-b border-slate-900 mx-auto w-64 min-h-[20px] pb-1">{schoolHeadName || ' '}</div>
+                <p className="uppercase text-[9px] text-slate-500">School Head</p>
               </div>
             </div>
           </div>
@@ -1087,20 +1228,21 @@ export const SF4ReportView: React.FC<SF4ReportViewProps> = ({ schoolId, calendar
             className="fixed inset-0 z-[200] bg-slate-50 overflow-y-auto flex flex-col font-sans text-slate-800 print-modal-container"
           >
             <style dangerouslySetInnerHTML={{ __html: `
+              @page { size: A4 landscape; margin: 4mm; }
+              @media screen {
+                .print-card-sf4 { background: #fff; }
+              }
               @media print {
-                @page { size: landscape; margin: 10mm; }
-                body { background: white !important; }
-                .print-card-sf4 {
-                  width: 277mm !important;
-                  max-width: 277mm !important;
-                  box-shadow: none !important;
-                  border: none !important;
-                  margin: 0 !important;
-                  padding: 0 !important;
-                }
-                .print-modal-container {
-                  background: white !important;
-                }
+                html, body, #root { width: 100% !important; max-width: none !important; margin: 0 !important; padding: 0 !important; background: white !important; }
+                body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+                .print-modal-container { position: static !important; inset: auto !important; display: block !important; width: 100% !important; max-width: none !important; height: auto !important; min-height: 0 !important; overflow: visible !important; background: white !important; }
+                .print-modal-container > *:not(style) { display: block !important; width: 100% !important; max-width: none !important; min-width: 0 !important; flex: none !important; }
+                .print-card-sf4 { display: block !important; width: 100% !important; min-width: 100% !important; max-width: none !important; min-height: 0 !important; height: auto !important; margin: 0 !important; padding: 0 !important; box-sizing: border-box !important; box-shadow: none !important; border: none !important; border-radius: 0 !important; overflow: visible !important; }
+                .print-card-sf4 table { width: 100% !important; max-width: 100% !important; table-layout: fixed !important; border-collapse: collapse !important; }
+                .print-card-sf4 thead { display: table-header-group; }
+                .print-card-sf4 tr { break-inside: avoid; page-break-inside: avoid; }
+                .print-card-sf4 * { box-sizing: border-box !important; }
+                .print-hidden, .print\\:hidden, button { display: none !important; }
               }
             `}} />
 
@@ -1121,6 +1263,14 @@ export const SF4ReportView: React.FC<SF4ReportViewProps> = ({ schoolId, calendar
                   <Printer size={14} />
                   Print Now
                 </button>
+                <button
+                  onClick={handlePrintNewWindow}
+                  title="Open the browser print dialog, then choose Save as PDF"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-[10px] uppercase tracking-wider shadow flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+                >
+                  <Download size={14} />
+                  Save as PDF
+                </button>
                 <button 
                   onClick={() => setIsPrintModalOpen(false)}
                   className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold text-[10px] uppercase tracking-wider shadow flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
@@ -1139,7 +1289,7 @@ export const SF4ReportView: React.FC<SF4ReportViewProps> = ({ schoolId, calendar
                 className="flex flex-col gap-8 print:gap-0 print:block print:transform-none select-none shadow-xl border border-slate-200/50 rounded-lg p-2 bg-white/50 print:border-0 print:p-0 print:bg-transparent"
               >
                 {/* PRINT PAGE CARD */}
-                <div id="sf4-print-card" className="bg-white w-[297mm] p-[0.35in] shadow-2xl rounded text-black border border-black flex flex-col overflow-hidden print:shadow-none print:m-0 border-collapse print-card-sf4">
+                <div id="sf4-print-card" className="bg-white w-full max-w-none min-h-[200mm] p-0 shadow-2xl rounded text-black border border-black flex flex-col box-border print:w-full print:max-w-none print:min-h-0 print:shadow-none print:m-0 print:p-0 print:border-0 print:rounded-none border-collapse print-card-sf4">
                   
                   {/* Header Section */}
                   <div className="text-center mb-4">
@@ -1320,13 +1470,13 @@ export const SF4ReportView: React.FC<SF4ReportViewProps> = ({ schoolId, calendar
                   <div className="mt-8 grid grid-cols-2 gap-12 text-[8px] font-bold">
                     <div className="text-center space-y-6">
                       <p>Prepared by:</p>
-                      <div className="border-b border-black mx-auto w-48 pb-1"></div>
-                      <p className="uppercase text-[7px] text-slate-500">(Signature over Printed Name of School Head)</p>
+                      <div className="border-b border-black mx-auto w-48 min-h-[16px] pb-1">{systemAdminName || ' '}</div>
+                      <p className="uppercase text-[7px] text-slate-500">System Admin</p>
                     </div>
                     <div className="text-center space-y-6">
                       <p>Submitted to:</p>
-                      <div className="border-b border-black mx-auto w-48 pb-1"></div>
-                      <p className="uppercase text-[7px] text-slate-500">(Signature over Printed Name of District/Division Official)</p>
+                      <div className="border-b border-black mx-auto w-48 min-h-[16px] pb-1">{schoolHeadName || ' '}</div>
+                      <p className="uppercase text-[7px] text-slate-500">School Head</p>
                     </div>
                   </div>
 

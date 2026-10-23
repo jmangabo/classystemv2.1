@@ -56,13 +56,16 @@ export const PrintAllSF2Button: React.FC<PrintAllSF2ButtonProps> = ({ sections, 
         const q = query(collection(db, `sections/${sec.id}/students`));
         const snap = await getDocs(q);
         const students = snap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
-        const enrolledStudents = students.filter(s => s.status !== 'Transferred Out' && s.status !== 'Dropped Out');
+        // Keep Dropped Out / Transferred Out learners in the All Sections
+        // report. SF2ReportView determines whether the learner should be
+        // displayed for the selected month and renders the exit remark.
+        const sectionStudents = students;
         
         const sectionSchoolCalendar = schoolCalendar.filter(c => c.schoolYear === sec.schoolYear);
         
         dataToRender.push({
           section: sec,
-          students: enrolledStudents,
+          students: sectionStudents,
           calendar: sectionSchoolCalendar
         });
       }

@@ -121,6 +121,22 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
     }
   };
 
+  const escapePrintHtml = (value: unknown) => {
+    const safe = String(value ?? '');
+    return safe
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .split('\n')
+      .map(line => line.trim())
+      .filter(Boolean)
+      .join('<br />');
+  };
+
   const handlePrintNewWindow = () => {
     if (!currentMonthData) return;
 
@@ -129,7 +145,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
 
     // Male Rows HTML
     const maleRowsHtml = sortedStudents.male.map((student, i) => {
-      const dailyData = student.dailyAttendance?.[selectedMonthKey] || student.dailyAttendance?.[currentMonthData.month] || {};
+      const dailyData = getMonthlyAttendance(student);
       let presentCount = 0;
       schoolDaysInMonth.forEach(dayInfo => {
         if (dailyData[dayInfo.day]) presentCount++;
@@ -139,28 +155,18 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
       if (absentCount < 0) absentCount = 0;
 
       let remarksText = "";
-      if (student.status === 'Dropped Out') {
-        const dParts = student.dropoutDate?.split('-');
-        if (dParts?.length === 3) {
-          const dropYear = parseInt(dParts[0]);
-          const dropMonth = parseInt(dParts[1]) - 1;
-          if (currentMonthData.year === dropYear && monthIndices[currentMonthData.month] === dropMonth) {
-            remarksText = `D/O: ${((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(student.dropoutDate!)(undefined, { month: 'short', day: 'numeric' })}`;
-          }
-        }
-      } else if (student.status === 'Transferred Out') {
-        const dParts = student.dropoutDate?.split('-');
-        if (dParts?.length === 3) {
-          const dropYear = parseInt(dParts[0]);
-          const dropMonth = parseInt(dParts[1]) - 1;
-          if (currentMonthData.year === dropYear && monthIndices[currentMonthData.month] === dropMonth) {
-            remarksText = `T/O to: ${student.transferredTo || ''}`;
-          }
-        }
+      const statusRemark = getMonthlyStatusRemark(student);
+      const exitRemark = getMonthlyExitRemark(student);
+      if (exitRemark) {
+        remarksText = String(exitRemark.text);
+      } else if (statusRemark) {
+        remarksText = String(statusRemark.text);
       }
 
       const attendanceCells = schoolDaysInMonth.map(dayInfo => {
         const isPresent = !!dailyData[dayInfo.day];
+        const isShaded = isAttendanceCellShaded(student, dayInfo);
+        if (isShaded) return `<td class="text-center transfer-shaded-cell" style="width: 14px; min-width: 14px; background: #475569 !important; background-color: #475569 !important; color: #475569 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact;"></td>`;
         return `<td class="text-center" style="width: 14px;">${!isPresent ? '<span class="absent-marker">X</span>' : '<span class="present-marker">.</span>'}</td>`;
       }).join('');
 
@@ -171,21 +177,45 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
           <td class="text-center font-bold" style="width: 20px;">${i + 1}</td>
           <td class="student-name" style="width: 220px;">
             ${formatStudentName(student)}
-            ${(student.status === 'Dropped Out' || student.status === 'Transferred Out') ? `<span class="student-status-sub">(${student.status === 'Dropped Out' ? 'Dropped' : 'Transferred'})</span>` : ''}
+
+          ${
+                    (() => {
+                      const statusRemark = getMonthlyStatusRemark(student);
+                      const exitRemarkForPrint = getMonthlyExitRemark(student);
+                      const remark = exitRemarkForPrint || statusRemark;
+
+                      if (!remark) return '';
+
+                      return `
+                        <span
+                          class="student-status-sub"
+                          style="
+                            color: ${remark.htmlColor};
+                            font-weight: 800;
+                            display: block;
+                            line-height: 1.2;
+                            white-space: normal;
+                          "
+                        >
+                          ${escapePrintHtml(String(remark.text))}
+                        </span>
+                      `;
+                    })()
+                  }
           </td>
           ${attendanceCells}
           ${emptyCells}
           <td class="text-center font-bold" style="color: #b91c1c;">${absentCount > 0 ? absentCount : 0}</td>
           <td class="text-center font-bold" style="color: #15803d;">${presentCount}</td>
           <td class="text-center font-bold bg-slate-50">${absentCount + presentCount}</td>
-          <td class="remarks-cell" style="width: 130px; font-weight: 600; font-size: 7.5px;">${remarksText}</td>
+          <td class="remarks-cell" style="width: 130px; font-weight: 600; font-size: 7.5px; line-height: 1.2; white-space: normal; vertical-align: top;">${escapePrintHtml(remarksText)}</td>
         </tr>
       `;
     }).join('');
 
     // Female Rows HTML
     const femaleRowsHtml = sortedStudents.female.map((student, i) => {
-      const dailyData = student.dailyAttendance?.[selectedMonthKey] || student.dailyAttendance?.[currentMonthData.month] || {};
+      const dailyData = getMonthlyAttendance(student);
       let presentCount = 0;
       schoolDaysInMonth.forEach(dayInfo => {
         if (dailyData[dayInfo.day]) presentCount++;
@@ -195,28 +225,15 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
       if (absentCount < 0) absentCount = 0;
 
       let remarksText = "";
-      if (student.status === 'Dropped Out') {
-        const dParts = student.dropoutDate?.split('-');
-        if (dParts?.length === 3) {
-          const dropYear = parseInt(dParts[0]);
-          const dropMonth = parseInt(dParts[1]) - 1;
-          if (currentMonthData.year === dropYear && monthIndices[currentMonthData.month] === dropMonth) {
-            remarksText = `D/O: ${((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(student.dropoutDate!)(undefined, { month: 'short', day: 'numeric' })}`;
-          }
-        }
-      } else if (student.status === 'Transferred Out') {
-        const dParts = student.dropoutDate?.split('-');
-        if (dParts?.length === 3) {
-          const dropYear = parseInt(dParts[0]);
-          const dropMonth = parseInt(dParts[1]) - 1;
-          if (currentMonthData.year === dropYear && monthIndices[currentMonthData.month] === dropMonth) {
-            remarksText = `T/O to: ${student.transferredTo || ''}`;
-          }
-        }
-      }
+      const statusRemark = getMonthlyStatusRemark(student);
+      const exitRemark = getMonthlyExitRemark(student);
+      const remark = exitRemark || statusRemark;
+      if (remark) remarksText = String(remark.text);
 
       const attendanceCells = schoolDaysInMonth.map(dayInfo => {
         const isPresent = !!dailyData[dayInfo.day];
+        const isShaded = isAttendanceCellShaded(student, dayInfo);
+        if (isShaded) return `<td class="text-center transfer-shaded-cell" style="width: 14px; min-width: 14px; background: #475569 !important; background-color: #475569 !important; color: #475569 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact;"></td>`;
         return `<td class="text-center" style="width: 14px;">${!isPresent ? '<span class="absent-marker">X</span>' : '<span class="present-marker">.</span>'}</td>`;
       }).join('');
 
@@ -227,14 +244,22 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
           <td class="text-center font-bold" style="width: 20px;">${i + 1}</td>
           <td class="student-name" style="width: 220px;">
             ${formatStudentName(student)}
-            ${(student.status === 'Dropped Out' || student.status === 'Transferred Out') ? `<span class="student-status-sub">(${student.status === 'Dropped Out' ? 'Dropped' : 'Transferred'})</span>` : ''}
+            ${
+              (() => {
+                const remark = getMonthlyExitRemark(student) || getMonthlyStatusRemark(student);
+
+                return remark
+                  ? `<span class="student-status-sub" style="color: ${remark.htmlColor}; font-weight: 800; display:block; line-height:1.2; white-space:normal;">${escapePrintHtml(String(remark.text))}</span>`
+                  : '';
+              })()
+            }
           </td>
           ${attendanceCells}
           ${emptyCells}
           <td class="text-center font-bold" style="color: #b91c1c;">${absentCount > 0 ? absentCount : 0}</td>
           <td class="text-center font-bold" style="color: #15803d;">${presentCount}</td>
           <td class="text-center font-bold bg-slate-50">${absentCount + presentCount}</td>
-          <td class="remarks-cell" style="width: 130px; font-weight: 600; font-size: 7.5px;">${remarksText}</td>
+          <td class="remarks-cell" style="width: 130px; font-weight: 600; font-size: 7.5px; line-height: 1.2; white-space: normal; vertical-align: top;">${escapePrintHtml(remarksText)}</td>
         </tr>
       `;
     }).join('');
@@ -254,7 +279,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
     const totalMaleAbsentHtml = schoolDaysInMonth.map(dayInfo => {
       let totalMaleAbsent = 0;
       sortedStudents.male.forEach(student => {
-        const data = student.dailyAttendance?.[selectedMonthKey] || student.dailyAttendance?.[currentMonthData.month] || {};
+        const data = getMonthlyAttendance(student);
         if (!data[dayInfo.day]) totalMaleAbsent++;
       });
       return `<td class="text-center font-bold bg-white" style="width: 14px; font-size: 8px;">${totalMaleAbsent || ''}</td>`;
@@ -264,7 +289,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
     const totalFemaleAbsentHtml = schoolDaysInMonth.map(dayInfo => {
       let totalFemaleAbsent = 0;
       sortedStudents.female.forEach(student => {
-        const data = student.dailyAttendance?.[selectedMonthKey] || student.dailyAttendance?.[currentMonthData.month] || {};
+        const data = getMonthlyAttendance(student);
         if (!data[dayInfo.day]) totalFemaleAbsent++;
       });
       return `<td class="text-center font-bold bg-white" style="width: 14px; font-size: 8px;">${totalFemaleAbsent || ''}</td>`;
@@ -274,7 +299,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
     const combinedTotalHtml = schoolDaysInMonth.map(dayInfo => {
       let totalAbsent = 0;
       students.forEach(student => {
-        const data = student.dailyAttendance?.[selectedMonthKey] || student.dailyAttendance?.[currentMonthData.month] || {};
+        const data = getMonthlyAttendance(student);
         if (!data[dayInfo.day]) totalAbsent++;
       });
       return `<td class="text-center font-black bg-slate-100" style="width: 14px; font-size: 8px;">${totalAbsent || ''}</td>`;
@@ -541,7 +566,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
             </div>
             <div class="info-item col-span-2">
               <span class="info-label">Report for the Month of:</span>
-              <span class="info-value" style="color: #4f46e5;">${currentMonthData.month} (Term ${currentMonthData.term})</span>
+              <span class="info-value" style="color: #4f46e5;">${currentMonthData.month}</span>
             </div>
           </div>
 
@@ -637,12 +662,6 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
                 </thead>
                 <tbody>
                   <tr>
-                    <td class="font-bold" style="font-style: italic; font-size: 7px;">* Enrolment as of 1st Friday</td>
-                    <td class="text-center font-bold">${summaryData?.enrolmentJune.m}</td>
-                    <td class="text-center font-bold">${summaryData?.enrolmentJune.f}</td>
-                    <td class="text-center font-bold" style="font-weight: 900;">${summaryData?.enrolmentJune.t}</td>
-                  </tr>
-                  <tr>
                     <td class="font-bold" style="font-style: italic; font-size: 7px;">Late Enrollment during month</td>
                     <td class="text-center font-bold">${summaryData?.lateEnroll.m || ''}</td>
                     <td class="text-center font-bold">${summaryData?.lateEnroll.f || ''}</td>
@@ -653,12 +672,6 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
                     <td class="text-center font-bold">${summaryData?.registered.m}</td>
                     <td class="text-center font-bold">${summaryData?.registered.f}</td>
                     <td class="text-center font-bold" style="font-weight: 900;">${summaryData?.registered.t}</td>
-                  </tr>
-                  <tr>
-                    <td class="font-bold" style="font-style: italic; font-size: 7px;">Percentage of Enrolment</td>
-                    <td class="text-center font-bold">${summaryData?.percEnrolment.m.toFixed(2)}%</td>
-                    <td class="text-center font-bold">${summaryData?.percEnrolment.f.toFixed(2)}%</td>
-                    <td class="text-center font-bold" style="font-weight: 900;">${summaryData?.percEnrolment.t.toFixed(2)}%</td>
                   </tr>
                   <tr>
                     <td class="font-bold" style="font-style: italic; font-size: 7px;">Average Daily Attendance</td>
@@ -736,26 +749,37 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
 
   const monthsList = useMemo(() => {
     if (!calendar || calendar.length === 0 || !section) return [];
-    const list: { key: string; month: string; year: number; term: string }[] = [];
-    const seenKeys = new Set<string>();
-    calendar.filter(c => c.schoolYear === section.schoolYear).forEach((c, idx) => {
-      const term = (c.term || '1').toString();
-      const baseKey = `${c.month}_${term}`;
-      let uniqueKey = baseKey;
-      if (seenKeys.has(uniqueKey)) {
-        uniqueKey = `${baseKey}_${c.id || idx}`;
-      }
-      seenKeys.add(uniqueKey);
-      list.push({
-        key: uniqueKey,
-        month: c.month,
-        year: parseInt(c.year) || new Date().getFullYear(),
-        term
+
+    // SF2 uses ONE reporting entry per calendar month.
+    // If a month contains both Term 1 and Term 2 calendar records,
+    // the month must not be split or displayed twice.
+    const byMonth = new Map<string, { key: string; month: string; year: number; term: string }>();
+
+    calendar
+      .filter(c => c.schoolYear === section.schoolYear)
+      .forEach(c => {
+        const month = String(c.month || '').trim();
+        if (!month || byMonth.has(month)) return;
+
+        byMonth.set(month, {
+          key: month,
+          month,
+          year: parseInt(c.year) || new Date().getFullYear(),
+          // Retained only for compatibility with existing metadata.
+          // It no longer controls monthly day splitting.
+          term: String(c.term || '1')
+        });
       });
-    });
-    return list.sort((a, b) => {
-       const monthOrder = ["June", "July", "August", "September", "October", "November", "December", "January", "February", "March", "April", "May"];
-       return monthOrder.indexOf(a.month) - monthOrder.indexOf(b.month);
+
+    const monthOrder = [
+      'June', 'July', 'August', 'September', 'October', 'November',
+      'December', 'January', 'February', 'March', 'April', 'May'
+    ];
+
+    return Array.from(byMonth.values()).sort((a, b) => {
+      const monthCompare = monthOrder.indexOf(a.month) - monthOrder.indexOf(b.month);
+      if (monthCompare !== 0) return monthCompare;
+      return a.year - b.year;
     });
   }, [calendar, section]);
 
@@ -783,153 +807,405 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
     return monthsList.find(m => m.key === selectedMonthKey);
   }, [monthsList, selectedMonthKey]);
 
+  // ============================================================
+  // TRANSFERRED IN — DARKEN DAYS BEFORE TRANSFER-IN DATE
+  // ============================================================
+  const normalizeStatus = (value: unknown) => String(value ?? '').trim().toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+  const isTransferredInLearner = (student: Student) => {
+    const s: any = student;
+    return normalizeStatus(s.status) === 'transferred in' || normalizeStatus(s.enrollmentStatus) === 'transferred in' || normalizeStatus(s.transferType) === 'transferred in' || normalizeStatus(s.movementType) === 'transferred in' || Boolean(s.isTransferredIn);
+  };
+  const toLocalDateKey = (rawDate: any): string | null => {
+    if (!rawDate) return null;
+    try {
+      let date: Date | null = null;
+      if (typeof rawDate === 'string') {
+        const match = rawDate.trim().match(/^(\d{4})[-\/]?(\d{1,2})[-\/]?(\d{1,2})/);
+        if (match) date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+        else { const parsed = new Date(rawDate); if (!Number.isNaN(parsed.getTime())) date = parsed; }
+      } else if (typeof rawDate?.toDate === 'function') { const parsed = rawDate.toDate(); if (parsed && !Number.isNaN(parsed.getTime())) date = parsed; }
+      else if (rawDate?.seconds != null) { const parsed = new Date(Number(rawDate.seconds) * 1000); if (!Number.isNaN(parsed.getTime())) date = parsed; }
+      else if (rawDate instanceof Date) date = rawDate;
+      if (!date || Number.isNaN(date.getTime())) return null;
+      return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+    } catch { return null; }
+  };
+  const getTransferInDateKey = (student: Student): string | null => { const s: any = student; return toLocalDateKey(s.transferInDate ?? s.dateOfFirstAttendance ?? s.dateOfAdmission); };
+  const getReportDayDateKey = (dayInfo: any): string | null => {
+    if (!currentMonthData || dayInfo?.day == null) return null;
+    const monthIndex = monthIndices[currentMonthData.month];
+    if (monthIndex == null) return null;
+    return `${currentMonthData.year}-${String(monthIndex+1).padStart(2,'0')}-${String(Number(dayInfo.day)).padStart(2,'0')}`;
+  };
+  const isBeforeTransferInDate = (student: Student, dayInfo: any) => {
+    if (!isTransferredInLearner(student)) return false;
+    const transferInDate = getTransferInDateKey(student);
+    const reportDate = getReportDayDateKey(dayInfo);
+    // Include the actual Transfer In date in the shaded range.
+    return !!transferInDate && !!reportDate && reportDate <= transferInDate;
+  };
+
+  // Shade attendance cells ON and AFTER the learner's Transferred Out /
+  // Dropped Out date, so the recorded exit date is included in the shade.
+  const isAfterExitDate = (student: Student, dayInfo: any) => {
+    const status = normalizeStatus((student as any).status);
+    if (status !== 'transferred out' && status !== 'dropped out') return false;
+
+    const exitDate = toLocalDateKey((student as any).dropoutDate);
+    const reportDate = getReportDayDateKey(dayInfo);
+    return !!exitDate && !!reportDate && reportDate >= exitDate;
+  };
+
+  const isAttendanceCellShaded = (student: Student, dayInfo: any) =>
+    isBeforeTransferInDate(student, dayInfo) || isAfterExitDate(student, dayInfo);
+
+  // Return the complete attendance map for the selected calendar month.
+  // Older records may be stored using month_term keys (for example
+  // September_1 and September_2). Merge those records so SF2 can report
+  // the month continuously instead of showing a Term 1/Term 2 split.
+  const getMonthlyAttendance = (student: Student) => {
+    if (!currentMonthData) return {};
+
+    const attendance: Record<string, any> = {};
+    const raw = (student as any).dailyAttendance || {};
+
+    // Preserve a direct month key when present.
+    if (raw[currentMonthData.month] && typeof raw[currentMonthData.month] === 'object') {
+      Object.assign(attendance, raw[currentMonthData.month]);
+    }
+
+    // Merge every term-specific record for this month.
+    Object.keys(raw).forEach(key => {
+      if (key.startsWith(`${currentMonthData.month}_`)) {
+        const termData = raw[key];
+        if (termData && typeof termData === 'object') {
+          Object.assign(attendance, termData);
+        }
+      }
+    });
+
+    // Backward compatibility with the current selector key.
+    if (selectedMonthKey && raw[selectedMonthKey] && typeof raw[selectedMonthKey] === 'object') {
+      Object.assign(attendance, raw[selectedMonthKey]);
+    }
+
+    return attendance;
+  };
+
+  /**
+   * Returns the Dropped Out / Transferred Out remark only during the
+   * learner's actual exit month. The Transfer Facility stores the
+   * destination/reason in dropoutReason, so that exact field is used.
+   */
+  
+const getMonthlyStatusRemark = (student: Student) => {
+  const isTransferredIn =
+    String((student as any).status ?? '').trim() === 'Transferred In' ||
+    Boolean((student as any).isTransferredIn);
+
+  if (!isTransferredIn || !currentMonthData) return null;
+
+  const rawDate =
+    (student as any).dateOfFirstAttendance ??
+    (student as any).transferInDate;
+
+  if (!rawDate) return null;
+
+  let date: Date | null = null;
+
+  try {
+    if (typeof rawDate === 'string') {
+      const parts = rawDate.split('-');
+
+      if (parts.length >= 3) {
+        const parsed = new Date(
+          Number(parts[0]),
+          Number(parts[1]) - 1,
+          Number(parts[2])
+        );
+
+        if (!Number.isNaN(parsed.getTime())) date = parsed;
+      } else {
+        const parsed = new Date(rawDate);
+        if (!Number.isNaN(parsed.getTime())) date = parsed;
+      }
+    } else if ((rawDate as any)?.seconds != null) {
+      const parsed = new Date(Number((rawDate as any).seconds) * 1000);
+      if (!Number.isNaN(parsed.getTime())) date = parsed;
+    } else if (typeof (rawDate as any)?.toDate === 'function') {
+      const parsed = (rawDate as any).toDate();
+      if (parsed && !Number.isNaN(parsed.getTime())) date = parsed;
+    }
+  } catch {
+    date = null;
+  }
+
+  if (!date) return null;
+
+  const reportMonth = monthIndices[currentMonthData.month];
+
+  if (
+    date.getFullYear() !== currentMonthData.year ||
+    date.getMonth() !== reportMonth
+  ) {
+    return null;
+  }
+
+  const dateText = date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric'
+  });
+
+  // Use the recorded source-school / transfer information as the second line.
+  // If no source is encoded, keep the same fallback used by Transfer Out.
+  const rawSource =
+    (student as any).transferInReason ??
+    (student as any).transferInSchool ??
+    (student as any).previousSchool ??
+    (student as any).previousSchoolName ??
+    (student as any).elemSchoolName ??
+    (student as any).schoolName ??
+    (student as any).dropoutReason ??
+    (student as any).reason ??
+    '';
+
+  const sourceText =
+    rawSource && typeof rawSource === 'object'
+      ? String(
+          rawSource.label ??
+          rawSource.name ??
+          rawSource.schoolName ??
+          rawSource.destination ??
+          rawSource.reason ??
+          rawSource.value ??
+          ''
+        ).trim()
+      : String(rawSource ?? '').trim();
+
+  const safeSourceText = sourceText || 'Not specified';
+
+  const text =
+    `TRANSFERRED IN — ${dateText}\n${safeSourceText}`;
+
+  return {
+    text: String(text),
+    shortText: `T/I — ${dateText}\n${safeSourceText}`,
+    className: 'text-emerald-700',
+    colorClass: 'text-emerald-700',
+    htmlColor: '#047857'
+  };
+};
+
+const getMonthlyExitRemark = (student: Student) => {
+    if (!currentMonthData) return null;
+
+    if (student.status !== 'Dropped Out' && student.status !== 'Transferred Out') {
+      return null;
+    }
+
+    const rawDate: any = (student as any).dropoutDate;
+    if (!rawDate) return null;
+
+    let exitDate: Date | null = null;
+
+    try {
+      if (typeof rawDate === 'string') {
+        const parts = rawDate.split('-');
+        if (parts.length >= 3) {
+          const year = Number(parts[0]);
+          const month = Number(parts[1]) - 1;
+          const day = Number(parts[2]);
+          const parsed = new Date(year, month, day);
+          if (!isNaN(parsed.getTime())) exitDate = parsed;
+        }
+      } else if (rawDate?.seconds != null) {
+        const parsed = new Date(Number(rawDate.seconds) * 1000);
+        if (!isNaN(parsed.getTime())) exitDate = parsed;
+      } else if (typeof rawDate?.toDate === 'function') {
+        const parsed = rawDate.toDate();
+        if (parsed && !isNaN(parsed.getTime())) exitDate = parsed;
+      } else {
+        const parsed = new Date(rawDate);
+        if (!isNaN(parsed.getTime())) exitDate = parsed;
+      }
+    } catch {
+      exitDate = null;
+    }
+
+    if (!exitDate) return null;
+
+    const exitYear = exitDate.getFullYear();
+    const exitMonth = exitDate.getMonth();
+    const reportMonth = monthIndices[currentMonthData.month];
+
+    if (exitYear !== currentMonthData.year || exitMonth !== reportMonth) {
+      return null;
+    }
+
+    const dateText = exitDate.toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric'
+    });
+
+    if (student.status === 'Dropped Out') {
+      const reason = String(
+        (student as any).dropoutReason ||
+        (student as any).reason ||
+        ''
+      ).trim();
+
+      return {
+        text: reason
+          ? `DROPPED OUT — ${dateText} — Reason: ${reason}`
+          : `DROPPED OUT — ${dateText} — Reason: Not specified`,
+        colorClass: 'text-red-700',
+        htmlColor: '#b91c1c'
+      };
+    }
+
+    // Transfer Facility uses dropoutReason for Destination / Reason.
+    // Normalize it BEFORE building the printable text so an object can never
+    // become [object Object] in the SF2 printout.
+    const rawDestinationReason: any = (student as any).dropoutReason;
+
+    const reasonText =
+      rawDestinationReason && typeof rawDestinationReason === 'object'
+        ? String(
+            rawDestinationReason.label ??
+            rawDestinationReason.name ??
+            rawDestinationReason.reason ??
+            rawDestinationReason.destination ??
+            rawDestinationReason.value ??
+            ''
+          ).trim()
+        : String(rawDestinationReason ?? '').trim();
+
+    const safeReasonText = reasonText || 'Not specified';
+    const text = `TRANSFERRED OUT — ${dateText}\n${safeReasonText}`;
+
+    return {
+      text: String(text),
+      shortText: `T/O — ${dateText}\n${safeReasonText}`,
+      className: 'text-blue-700',
+      colorClass: 'text-blue-700',
+      htmlColor: '#1d4ed8'
+    };
+  };
+
   const schoolDaysInMonth = useMemo(() => {
     if (!currentMonthData) return [];
-    
-    // Find calendar entry
-    const calendarEntry = calendar.find(c => 
-        c.month === currentMonthData.month && 
-        c.schoolYear === section.schoolYear &&
-        (c.term || '1').toString() === currentMonthData.term
-    );
-    if (!calendarEntry) return [];
 
-    // Filter calendar by school year
-    const calendarForSchoolYear = calendar.filter(c => c.schoolYear === section.schoolYear);
+    // IMPORTANT: Do not split a month by term in SF2.
+    // A calendar month can contain Term 1 and Term 2 entries; all valid
+    // school days in that calendar month belong to the same SF2 report.
+    const monthEntries = calendar
+      .filter(c =>
+        c.month === currentMonthData.month &&
+        c.schoolYear === section.schoolYear
+      )
+      .sort((a, b) => (parseInt(a.term) || 1) - (parseInt(b.term) || 1));
 
-    // Identify the first month of the school year
-    const monthOrder = ["June", "July", "August", "September", "October", "November", "December", "January", "February", "March", "April", "May"];
+    if (monthEntries.length === 0) return [];
+
     const monthIndex = monthIndices[currentMonthData.month];
     const year = currentMonthData.year;
-    
-    const openingDate = parseInt(calendarEntry.openingDate || '1');
-    const closingDate = parseInt(calendarEntry.closingDate || '31');
-
     const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
-    const schoolDays: { day: number, dateStr: string }[] = [];
 
-    // First, collect ALL school days for this month (regardless of term) to allow for dynamic splitting if needed
-    const allPossibleSchoolDays: { day: number, dateStr: string }[] = [];
-    for (let day = 1; day <= daysInMonth; day++) {
+    // Respect manually encoded opening/closing dates across all term records.
+    const openingDate = Math.max(1, Math.min(...monthEntries.map(c => parseInt(c.openingDate || '1') || 1)));
+    const closingDate = Math.min(daysInMonth, Math.max(...monthEntries.map(c => parseInt(c.closingDate || String(daysInMonth)) || daysInMonth)));
+
+    // Combine local holidays from all term records for this month.
+    const localHolidays = new Set<number>();
+    monthEntries.forEach(c => {
+      (Array.isArray(c.localHolidays) ? c.localHolidays : []).forEach((d: any) => {
+        const n = Number(d);
+        if (Number.isFinite(n)) localHolidays.add(n);
+      });
+    });
+
+    const schoolDays: { day: number; dateStr: string }[] = [];
+    // The Calendar database's `days` field is the authoritative number of
+    // school days for this month (e.g. April may be configured as 6 days).
+    // Keep the displayed dates and attendance numerator aligned with that count.
+    const configuredSchoolDays = monthEntries.reduce(
+      (sum, entry) => sum + Math.max(0, Number.parseInt(String(entry.days ?? '0'), 10) || 0),
+      0
+    );
+
+    for (let day = openingDate; day <= closingDate; day++) {
+      const date = new Date(year, monthIndex, day);
+      const dayOfWeek = date.getDay();
+      const monthNum = (monthIndex + 1).toString().padStart(2, '0');
+      const dayNum = day.toString().padStart(2, '0');
+      const dateId = `${monthNum}-${dayNum}`;
+      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+      const isHoliday = PHILIPPINE_HOLIDAYS.includes(dateId) || localHolidays.has(day);
+
+      if (!isWeekend && !isHoliday) {
+        schoolDays.push({ day, dateStr: dateId });
+        // `days` stores a count, not individual dates. When it is configured,
+        // limit the month to that many eligible school dates in the configured
+        // opening/closing range. If it is missing/zero, retain the date-derived list.
+        if (configuredSchoolDays > 0 && schoolDays.length >= configuredSchoolDays) break;
+      }
+    }
+
+    return schoolDays;
+  }, [currentMonthData, calendar, section.schoolYear]);
+
+  const allSchoolDaysOfYear = useMemo(() => {
+    if (!calendar || calendar.length === 0 || !section || monthsList.length === 0) return [];
+
+    const yearDays: { dateStr: string; dateObj: Date }[] = [];
+
+    monthsList.forEach(m => {
+      const monthEntries = calendar
+        .filter(c => c.month === m.month && c.schoolYear === section.schoolYear)
+        .sort((a, b) => (parseInt(a.term) || 1) - (parseInt(b.term) || 1));
+
+      if (monthEntries.length === 0) return;
+
+      const monthIndex = monthIndices[m.month];
+      const year = m.year;
+      const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+      const openingDate = Math.max(1, Math.min(...monthEntries.map(c => parseInt(c.openingDate || '1') || 1)));
+      const closingDate = Math.min(daysInMonth, Math.max(...monthEntries.map(c => parseInt(c.closingDate || String(daysInMonth)) || daysInMonth)));
+
+      const localHolidays = new Set<number>();
+      monthEntries.forEach(c => {
+        (Array.isArray(c.localHolidays) ? c.localHolidays : []).forEach((d: any) => {
+          const n = Number(d);
+          if (Number.isFinite(n)) localHolidays.add(n);
+        });
+      });
+
+      const configuredSchoolDays = monthEntries.reduce(
+        (sum, entry) => sum + Math.max(0, Number.parseInt(String(entry.days ?? '0'), 10) || 0),
+        0
+      );
+      let includedSchoolDays = 0;
+
+      for (let day = openingDate; day <= closingDate; day++) {
         const date = new Date(year, monthIndex, day);
         const dayOfWeek = date.getDay();
         const monthNum = (monthIndex + 1).toString().padStart(2, '0');
         const dayNum = day.toString().padStart(2, '0');
         const dateId = `${monthNum}-${dayNum}`;
         const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-        const isLocalHoliday = calendarEntry?.localHolidays?.includes(day);
-        const isHoliday = PHILIPPINE_HOLIDAYS.includes(dateId) || isLocalHoliday;
+        const isHoliday = PHILIPPINE_HOLIDAYS.includes(dateId) || localHolidays.has(day);
+
         if (!isWeekend && !isHoliday) {
-            allPossibleSchoolDays.push({ day, dateStr: dateId });
+          yearDays.push({
+            dateStr: `${year}-${monthNum}-${dayNum}`,
+            dateObj: date
+          });
+          includedSchoolDays++;
+          if (configuredSchoolDays > 0 && includedSchoolDays >= configuredSchoolDays) break;
         }
-    }
-
-    // Determine if we should use manual coverage or dynamic split
-    const hasManualCoverage = openingDate !== 1 || (closingDate !== 31 && closingDate !== daysInMonth);
-
-    if (hasManualCoverage) {
-        // Use manual coverage
-        for (let day = 1; day <= daysInMonth; day++) {
-            if (day < openingDate || day > closingDate) continue;
-            const date = new Date(year, monthIndex, day);
-            const dayOfWeek = date.getDay();
-            const monthNum = (monthIndex + 1).toString().padStart(2, '0');
-            const dayNum = day.toString().padStart(2, '0');
-            const dateId = `${monthNum}-${dayNum}`;
-            const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-            const isLocalHoliday = calendarEntry?.localHolidays?.includes(day);
-            const isHoliday = PHILIPPINE_HOLIDAYS.includes(dateId) || isLocalHoliday;
-            if (!isWeekend && !isHoliday) {
-                schoolDays.push({ day, dateStr: dateId });
-            }
-        }
-        return schoolDays;
-    } else {
-        // Use dynamic split based on the number of entries for this month
-        const allEntriesForMonthForSY = calendar.filter(c => 
-            c.month === currentMonthData.month && 
-            c.schoolYear === section.schoolYear
-        ).sort((a, b) => (parseInt(a.term) || 1) - (parseInt(b.term) || 1));
-
-        const currentTerm = parseInt(currentMonthData.term || '1');
-        let startIndex = 0;
-        for (const entry of allEntriesForMonthForSY) {
-            if ((parseInt(entry.term) || 1) < currentTerm) {
-                startIndex += parseInt(entry.days) || 0;
-            } else {
-                break;
-            }
-        }
-        const daysToTake = parseInt(calendarEntry.days) || allPossibleSchoolDays.length;
-        return allPossibleSchoolDays.slice(startIndex, startIndex + daysToTake);
-    }
-  }, [currentMonthData, calendar]);
-
-  const allSchoolDaysOfYear = useMemo(() => {
-    if (!calendar || calendar.length === 0 || !section || monthsList.length === 0) return [];
-    
-    const yearDays: { dateStr: string; dateObj: Date }[] = [];
-    
-    monthsList.forEach(m => {
-       const calendarEntry = calendar.find(c => 
-          c.month === m.month && 
-          c.schoolYear === section.schoolYear &&
-          (c.term || '1').toString() === m.term
-       );
-       if (!calendarEntry) return;
-
-       const monthIndex = monthIndices[m.month];
-       const year = m.year;
-       const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
-       
-       const openingDate = parseInt(calendarEntry.openingDate || '1');
-       const closingDate = parseInt(calendarEntry.closingDate || '31');
-
-       const monthSchoolDaysRaw: { dateStr: string; dateObj: Date, day: number }[] = [];
-       for (let day = 1; day <= daysInMonth; day++) {
-           const date = new Date(year, monthIndex, day);
-           const dayOfWeek = date.getDay(); 
-           const monthNum = (monthIndex + 1).toString().padStart(2, '0');
-           const dayNum = day.toString().padStart(2, '0');
-           const dateId = `${monthNum}-${dayNum}`;
-           const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-           const isLocalHoliday = calendarEntry?.localHolidays?.includes(day);
-           const isHoliday = PHILIPPINE_HOLIDAYS.includes(dateId) || isLocalHoliday;
-
-           if (!isWeekend && !isHoliday) {
-               monthSchoolDaysRaw.push({ 
-                 dateStr: `${year}-${monthNum}-${dayNum}`,
-                 dateObj: date,
-                 day
-               });
-           }
-       }
-
-       const hasManualCoverage = openingDate !== 1 || (closingDate !== 31 && closingDate !== daysInMonth);
-       
-       if (hasManualCoverage) {
-           const filtered = monthSchoolDaysRaw.filter(d => d.day >= openingDate && d.day <= closingDate);
-           yearDays.push(...filtered);
-       } else {
-           const allEntriesForMonthForSY = calendar.filter(c => 
-               c.month === m.month && 
-               c.schoolYear === section.schoolYear
-           ).sort((a, b) => (parseInt(a.term) || 1) - (parseInt(b.term) || 1));
-
-           const currentTerm = parseInt(m.term || '1');
-           let startIndex = 0;
-           for (const entry of allEntriesForMonthForSY) {
-               if ((parseInt(entry.term) || 1) < currentTerm) {
-                   startIndex += (parseInt(entry.days) || 0);
-               } else {
-                   break;
-               }
-           }
-           const daysToTake = parseInt(calendarEntry.days) || monthSchoolDaysRaw.length;
-           yearDays.push(...monthSchoolDaysRaw.slice(startIndex, startIndex + daysToTake));
-       }
+      }
     });
-    
+
     return yearDays;
   }, [calendar, section, monthsList]);
 
@@ -951,14 +1227,22 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
       if (!isVisibleByFOA) return false;
 
       // Check Transferred Out / Dropped Out
+      // Show the learner before and during the month of the exit date.
+      // Hide the learner only after the exit month has passed.
       if (s.status === 'Dropped Out' || s.status === 'Transferred Out') {
         if (s.dropoutDate) {
           const dParts = s.dropoutDate.split('-');
           if (dParts.length === 3) {
-            const dropYear = parseInt(dParts[0]);
-            const dropMonth = parseInt(dParts[1]) - 1;
-            // Visible only if current month is BEFORE or EQUAL to drop month
-            if (reportYear > dropYear || (reportYear === dropYear && reportMonthIndex > dropMonth)) {
+            const exitYear = parseInt(dParts[0], 10);
+            const exitMonth = parseInt(dParts[1], 10) - 1;
+
+            // Hide only when the report month is AFTER the exit month.
+            // The learner remains visible in the month of the exit date
+            // so the D/O or T/O remark can still be displayed.
+            if (
+              reportYear > exitYear ||
+              (reportYear === exitYear && reportMonthIndex > exitMonth)
+            ) {
               return false;
             }
           }
@@ -980,132 +1264,306 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
   const summaryData = useMemo(() => {
     if (!currentMonthData || !schoolDaysInMonth.length) return null;
 
-    // Define global late enrollee detector based on 80% cut-off
+    /* ============================================================
+       SF2 SUMMARY COMPUTATION
+
+       Display-only: Enrolment as of (1st Friday of June)
+       is retained in the SF2 summary but is NOT used in
+       any computation.
+
+       b. Average Daily Attendance
+          Total Daily Attendance
+          ----------------------
+          Number of School Days in reporting month
+
+       c. Percentage of Attendance for the month
+          Average Daily Attendance
+          ------------------------ x 100
+          Registered Learners as of end of month
+       ============================================================ */
+
+    // Determine late enrollee using the existing 80% cut-off rule.
     const isLateEnrolleeGlobal = (s: Student) => {
       if (!s.dateOfFirstAttendance) return false;
       if (allSchoolDaysOfYear.length === 0) return false;
-      const firstAttendIndex = allSchoolDaysOfYear.findIndex(d => d.dateStr >= s.dateOfFirstAttendance);
+
+      const firstAttendIndex = allSchoolDaysOfYear.findIndex(
+        d => d.dateStr >= s.dateOfFirstAttendance!
+      );
+
       if (firstAttendIndex === -1) return false;
-      
-      const remainingDays = allSchoolDaysOfYear.length - firstAttendIndex;
-      return (remainingDays / allSchoolDaysOfYear.length) < 0.8;
+
+      const remainingDays =
+        allSchoolDaysOfYear.length - firstAttendIndex;
+
+      return (
+        remainingDays / allSchoolDaysOfYear.length
+      ) < 0.8;
     };
 
-    // enrolment June is constant (all students who did not late enroll, regardless of drop status later)
-    const enrolmentJuneMale = students.filter(s => 
-      s.sex?.toLowerCase() === 'male' && 
-      s.dateOfFirstAttendance && 
+    // ============================================================
+    // DISPLAY ONLY: ENROLMENT AS OF (1st Friday of June)
+    // IMPORTANT: These values are displayed in SF2 only.
+    // They are NOT used as a denominator or input in any
+    // attendance, enrolment-percentage, or other computation.
+    // ============================================================
+    const enrolmentJuneMale = students.filter(s =>
+      s.sex?.toLowerCase() === 'male' &&
+      s.dateOfFirstAttendance &&
       !isLateEnrolleeGlobal(s)
     ).length;
 
-    const enrolmentJuneFemale = students.filter(s => 
-      s.sex?.toLowerCase() === 'female' && 
-      s.dateOfFirstAttendance && 
+    const enrolmentJuneFemale = students.filter(s =>
+      s.sex?.toLowerCase() === 'female' &&
+      s.dateOfFirstAttendance &&
       !isLateEnrolleeGlobal(s)
     ).length;
 
-    const enrolmentJuneTotal = enrolmentJuneMale + enrolmentJuneFemale;
+    const enrolmentJuneTotal =
+      enrolmentJuneMale + enrolmentJuneFemale;
 
-    // Late enrollees in the CURRENT month only
+    // ============================================================
+    // LATE ENROLLMENT DURING CURRENT MONTH (BEYOND CUT-OFF)
+    // ============================================================
+    // IMPORTANT:
+    // Learners whose movement is explicitly marked as
+    // "Transferred In" / "Move In" are NOT late enrollees.
+    // They are reported under the separate "Transferred In"
+    // category instead.
+    const isTransferredInOrMoveIn = (s: Student) => {
+      const student: any = s as any;
+
+      const normalize = (value: unknown) =>
+        String(value ?? '')
+          .trim()
+          .toLowerCase()
+          .replace(/[_-]+/g, ' ')
+          .replace(/\s+/g, ' ');
+
+      const movementValues = [
+        student.status,
+        student.enrollmentStatus,
+        student.transferType,
+        student.movementType,
+        student.enrollmentType
+      ].map(normalize);
+
+      return (
+        movementValues.includes('transferred in') ||
+        movementValues.includes('move in') ||
+        Boolean(student.isTransferredIn) ||
+        Boolean(student.isMoveIn)
+      );
+    };
+
     const isLateEnrolleeInCurrentMonth = (s: Student) => {
       if (!s.dateOfFirstAttendance) return false;
+
+      // A Transferred In / Move In learner must never be counted
+      // in "Late Enrollment during the month (beyond cut-off)".
+      if (isTransferredInOrMoveIn(s)) return false;
+
       const parts = s.dateOfFirstAttendance.split('-');
       if (parts.length < 3) return false;
-      const year = parseInt(parts[0]);
-      const monthIndex = parseInt(parts[1]) - 1;
-      const reportMonthIndex = monthIndices[currentMonthData.month];
-      
-      if (year !== currentMonthData.year || monthIndex !== reportMonthIndex) return false;
+
+      const year = parseInt(parts[0], 10);
+      const monthIndex = parseInt(parts[1], 10) - 1;
+      const reportMonthIndex =
+        monthIndices[currentMonthData.month];
+
+      if (
+        year !== currentMonthData.year ||
+        monthIndex !== reportMonthIndex
+      ) {
+        return false;
+      }
 
       return isLateEnrolleeGlobal(s);
     };
 
-    const lateEnrollMale = students.filter(s => 
-      s.sex?.toLowerCase() === 'male' && 
+    const lateEnrollMale = students.filter(s =>
+      s.sex?.toLowerCase() === 'male' &&
       isLateEnrolleeInCurrentMonth(s)
     ).length;
 
-    const lateEnrollFemale = students.filter(s => 
-      s.sex?.toLowerCase() === 'female' && 
+    const lateEnrollFemale = students.filter(s =>
+      s.sex?.toLowerCase() === 'female' &&
       isLateEnrolleeInCurrentMonth(s)
     ).length;
 
-    const lateEnrollTotal = lateEnrollMale + lateEnrollFemale;
+    const lateEnrollTotal =
+      lateEnrollMale + lateEnrollFemale;
 
-    // Registered learners as of end of the current month (excludes students who dropped out in or before this month)
+    // ============================================================
+    // REGISTERED LEARNERS AS OF END OF MONTH
+    // ============================================================
     const isRegisteredAtEndOfMonth = (s: Student) => {
-      if (s.status === 'Dropped Out' || s.status === 'Transferred Out') {
+      if (
+        s.status === 'Dropped Out' ||
+        s.status === 'Transferred Out'
+      ) {
         if (!s.dropoutDate) return false;
+
         const dParts = s.dropoutDate.split('-');
-        if (dParts.length === 3) {
-          const dropYear = parseInt(dParts[0]);
-          const dropMonth = parseInt(dParts[1]) - 1;
-          const reportMonthIndex = monthIndices[currentMonthData.month];
-          if (currentMonthData.year > dropYear || (currentMonthData.year === dropYear && reportMonthIndex >= dropMonth)) {
-            return false;
-          }
-        } else {
+        if (dParts.length !== 3) return false;
+
+        const dropYear = parseInt(dParts[0], 10);
+        const dropMonth = parseInt(dParts[1], 10) - 1;
+        const reportMonthIndex =
+          monthIndices[currentMonthData.month];
+
+        // SF2 registered learners at the end of the month
+        // exclude learners whose exit date is in or before
+        // the reporting month.
+        if (
+          currentMonthData.year > dropYear ||
+          (
+            currentMonthData.year === dropYear &&
+            reportMonthIndex >= dropMonth
+          )
+        ) {
           return false;
         }
       }
+
       return true;
     };
 
-    const registeredMale = sortedStudents.male.filter(isRegisteredAtEndOfMonth).length;
-    const registeredFemale = sortedStudents.female.filter(isRegisteredAtEndOfMonth).length;
-    const registeredTotal = registeredMale + registeredFemale;
+    const registeredMale =
+      sortedStudents.male.filter(
+        isRegisteredAtEndOfMonth
+      ).length;
 
-    // Calculate Average Daily Attendance
+    const registeredFemale =
+      sortedStudents.female.filter(
+        isRegisteredAtEndOfMonth
+      ).length;
+
+    const registeredTotal =
+      registeredMale + registeredFemale;
+
+    // ============================================================
+    // ACTIVE-ON-DAY CHECK
+    // Attendance used in the monthly summary is limited to learners
+    // who are REGISTERED AS OF THE END OF THE REPORTING MONTH.
+    // Also do not count attendance before first attendance or after
+    // the learner's Dropped Out / Transferred Out date.
+    // ============================================================
+    const isDayWithinEnrollment = (
+      student: Student,
+      dayInfo: { day: number; dateStr: string }
+    ) => {
+      if (!student.dateOfFirstAttendance) return false;
+
+      const fullDate = `${currentMonthData.year}-${dayInfo.dateStr}`;
+
+      if (fullDate < student.dateOfFirstAttendance) return false;
+
+      if (
+        student.status === 'Dropped Out' ||
+        student.status === 'Transferred Out'
+      ) {
+        if (student.dropoutDate && fullDate > student.dropoutDate) {
+          return false;
+        }
+      }
+
+      return true;
+    };
+
+    // ============================================================
+    // TOTAL DAILY ATTENDANCE
+    // Only learners counted in "Registered Learner as of end of
+    // month" are used for ADA and percentage-of-attendance figures.
+    // ============================================================
     let totalPresentMale = 0;
     let totalPresentFemale = 0;
 
     schoolDaysInMonth.forEach(dayInfo => {
-      sortedStudents.male.forEach(s => {
-        const dailyData = s.dailyAttendance?.[selectedMonthKey] || s.dailyAttendance?.[currentMonthData!.month] || {};
+      sortedStudents.male.forEach(student => {
+        if (
+          !isRegisteredAtEndOfMonth(student) ||
+          !isDayWithinEnrollment(student, dayInfo)
+        ) return;
+
+        const dailyData = getMonthlyAttendance(student);
         if (dailyData[dayInfo.day]) totalPresentMale++;
       });
-      sortedStudents.female.forEach(s => {
-        const dailyData = s.dailyAttendance?.[selectedMonthKey] || s.dailyAttendance?.[currentMonthData!.month] || {};
+
+      sortedStudents.female.forEach(student => {
+        if (
+          !isRegisteredAtEndOfMonth(student) ||
+          !isDayWithinEnrollment(student, dayInfo)
+        ) return;
+
+        const dailyData = getMonthlyAttendance(student);
         if (dailyData[dayInfo.day]) totalPresentFemale++;
       });
     });
 
-    const avgDailyMale = schoolDaysInMonth.length > 0 ? Math.round((totalPresentMale / schoolDaysInMonth.length) * 100) / 100 : 0;
-    const avgDailyFemale = schoolDaysInMonth.length > 0 ? Math.round((totalPresentFemale / schoolDaysInMonth.length) * 100) / 100 : 0;
-    const avgDailyTotal = Math.round((avgDailyMale + avgDailyFemale) * 100) / 100;
+    const totalDailyAttendance = totalPresentMale + totalPresentFemale;
 
-    // Percentages
-    const percEnrolmentMale = enrolmentJuneMale > 0 ? Math.round(((registeredMale / enrolmentJuneMale) * 100) * 100) / 100 : 0;
-    const percEnrolmentFemale = enrolmentJuneFemale > 0 ? Math.round(((registeredFemale / enrolmentJuneFemale) * 100) * 100) / 100 : 0;
-    const percEnrolmentTotal = enrolmentJuneTotal > 0 ? Math.round(((registeredTotal / enrolmentJuneTotal) * 100) * 100) / 100 : 0;
+    // Use the school-day totals encoded in the Calendar database for this
+    // school year and reporting month. Multiple term records in the same
+    // month are combined, because SF2 reports one row per calendar month.
+    const databaseSchoolDays = calendar
+      .filter(c =>
+        c.month === currentMonthData.month &&
+        c.schoolYear === section.schoolYear
+      )
+      .reduce((sum, c) => sum + Math.max(0, Number.parseInt(String(c.days ?? '0'), 10) || 0), 0);
 
-    const percAttendanceMale = registeredMale > 0 ? Math.round(((avgDailyMale / registeredMale) * 100) * 100) / 100 : 0;
-    const percAttendanceFemale = registeredFemale > 0 ? Math.round(((avgDailyFemale / registeredFemale) * 100) * 100) / 100 : 0;
-    const percAttendanceTotal = registeredTotal > 0 ? Math.round(((avgDailyTotal / registeredTotal) * 100) * 100) / 100 : 0;
+    // Fall back to the generated date list only if the database has no
+    // positive school-day total for this month.
+    const numberOfSchoolDays = schoolDaysInMonth.length > 0
+      ? schoolDaysInMonth.length
+      : (databaseSchoolDays > 0 ? databaseSchoolDays : 0);
 
-    // Helper to check if student is active on a given day
-    const isDayWithinEnrollment = (student: Student, dayInfo: { day: number, dateStr: string }) => {
-      if (!student.dateOfFirstAttendance) return false;
-      if (dayInfo.dateStr < student.dateOfFirstAttendance) return false;
-      if (student.status === 'Dropped Out' || student.status === 'Transferred Out') {
-        if (student.dropoutDate && dayInfo.dateStr > student.dropoutDate) {
-          return false;
-        }
-      }
-      return true;
-    };
+    // Average Daily Attendance = total learner-days present / database school days.
+    const avgDailyMale = numberOfSchoolDays > 0
+      ? Math.round((totalPresentMale / numberOfSchoolDays) * 100) / 100
+      : 0;
 
-    // Helper to count consecutive absences
-    const countConsecutiveAbsences = (student: Student) => {
-      const dailyData = student.dailyAttendance?.[selectedMonthKey] || student.dailyAttendance?.[currentMonthData!.month] || {};
+    const avgDailyFemale = numberOfSchoolDays > 0
+      ? Math.round((totalPresentFemale / numberOfSchoolDays) * 100) / 100
+      : 0;
+
+    const avgDailyTotal = numberOfSchoolDays > 0
+      ? Math.round((totalDailyAttendance / numberOfSchoolDays) * 100) / 100
+      : 0;
+
+    // Percentage = ADA / registered learners at end of month * 100.
+    // Clamp at 100% so rounding or inconsistent records cannot exceed it.
+    const attendancePercentage = (average: number, registeredCount: number) =>
+      registeredCount > 0
+        ? Math.min(100, Math.round((average / registeredCount) * 10000) / 100)
+        : 0;
+
+    const percAttendanceMale = attendancePercentage(avgDailyMale, registeredMale);
+    const percAttendanceFemale = attendancePercentage(avgDailyFemale, registeredFemale);
+    const percAttendanceTotal = attendancePercentage(avgDailyTotal, registeredTotal);
+
+    // ============================================================
+    // ABSENT 5+ CONSECUTIVE DAYS
+    // ============================================================
+    const countConsecutiveAbsences = (
+      student: Student
+    ) => {
+      const dailyData = getMonthlyAttendance(student);
       let consecutiveAbsences = 0;
       let maxConsecutive = 0;
+
       for (const dayInfo of schoolDaysInMonth) {
         if (isDayWithinEnrollment(student, dayInfo)) {
-          const isPresent = !!dailyData[dayInfo.day];
+          const isPresent =
+            !!dailyData[dayInfo.day];
+
           if (!isPresent) {
             consecutiveAbsences++;
-            if (consecutiveAbsences > maxConsecutive) {
+
+            if (
+              consecutiveAbsences > maxConsecutive
+            ) {
               maxConsecutive = consecutiveAbsences;
             }
           } else {
@@ -1115,53 +1573,164 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
           consecutiveAbsences = 0;
         }
       }
+
       return maxConsecutive;
     };
 
-    const absent5ConsecMale = sortedStudents.male.filter(s => countConsecutiveAbsences(s) >= 5).length;
-    const absent5ConsecFemale = sortedStudents.female.filter(s => countConsecutiveAbsences(s) >= 5).length;
-    const absent5ConsecTotal = absent5ConsecMale + absent5ConsecFemale;
+    const absent5ConsecMale =
+      sortedStudents.male.filter(
+        s => countConsecutiveAbsences(s) >= 5
+      ).length;
 
-    const isTransferredOutInCurrentMonth = (s: Student) => {
-      if (s.status !== 'Transferred Out') return false;
+    const absent5ConsecFemale =
+      sortedStudents.female.filter(
+        s => countConsecutiveAbsences(s) >= 5
+      ).length;
+
+    const absent5ConsecTotal =
+      absent5ConsecMale + absent5ConsecFemale;
+
+    // ============================================================
+    // TRANSFERRED OUT IN CURRENT MONTH
+    // ============================================================
+    const isTransferredOutInCurrentMonth = (
+      s: Student
+    ) => {
+      if (s.status !== 'Transferred Out') {
+        return false;
+      }
+
       if (!s.dropoutDate) return false;
+
       const dParts = s.dropoutDate.split('-');
       if (dParts.length !== 3) return false;
-      const dropYear = parseInt(dParts[0]);
-      const dropMonth = parseInt(dParts[1]) - 1;
-      return currentMonthData.year === dropYear && monthIndices[currentMonthData.month] === dropMonth;
+
+      const dropYear = parseInt(dParts[0], 10);
+      const dropMonth = parseInt(dParts[1], 10) - 1;
+
+      return (
+        currentMonthData.year === dropYear &&
+        monthIndices[currentMonthData.month] === dropMonth
+      );
     };
 
-    const transOutMale = sortedStudents.male.filter(isTransferredOutInCurrentMonth).length;
-    const transOutFemale = sortedStudents.female.filter(isTransferredOutInCurrentMonth).length;
-    const transOutTotal = transOutMale + transOutFemale;
+    const transOutMale =
+      sortedStudents.male.filter(
+        isTransferredOutInCurrentMonth
+      ).length;
 
-    const isTransferredInInCurrentMonth = (s: Student) => {
+    const transOutFemale =
+      sortedStudents.female.filter(
+        isTransferredOutInCurrentMonth
+      ).length;
+
+    const transOutTotal =
+      transOutMale + transOutFemale;
+
+    // ============================================================
+    // TRANSFERRED IN IN CURRENT MONTH
+    // ============================================================
+    const isTransferredInInCurrentMonth = (
+      s: Student
+    ) => {
       if (!s.isTransferredIn) return false;
       if (!s.dateOfFirstAttendance) return false;
-      const foaParts = s.dateOfFirstAttendance.split('-');
+
+      const foaParts =
+        s.dateOfFirstAttendance.split('-');
+
       if (foaParts.length !== 3) return false;
-      const foaYear = parseInt(foaParts[0]);
-      const foaMonth = parseInt(foaParts[1]) - 1;
-      return currentMonthData.year === foaYear && monthIndices[currentMonthData.month] === foaMonth;
+
+      const foaYear = parseInt(foaParts[0], 10);
+      const foaMonth = parseInt(foaParts[1], 10) - 1;
+
+      return (
+        currentMonthData.year === foaYear &&
+        monthIndices[currentMonthData.month] === foaMonth
+      );
     };
 
-    const transInMale = sortedStudents.male.filter(isTransferredInInCurrentMonth).length;
-    const transInFemale = sortedStudents.female.filter(isTransferredInInCurrentMonth).length;
-    const transInTotal = transInMale + transInFemale;
+    const transInMale =
+      sortedStudents.male.filter(
+        isTransferredInInCurrentMonth
+      ).length;
+
+    const transInFemale =
+      sortedStudents.female.filter(
+        isTransferredInInCurrentMonth
+      ).length;
+
+    const transInTotal =
+      transInMale + transInFemale;
 
     return {
-      enrolmentJune: { m: enrolmentJuneMale, f: enrolmentJuneFemale, t: enrolmentJuneTotal },
-      lateEnroll: { m: lateEnrollMale, f: lateEnrollFemale, t: lateEnrollTotal },
-      registered: { m: registeredMale, f: registeredFemale, t: registeredTotal },
-      avgAttendance: { m: avgDailyMale, f: avgDailyFemale, t: avgDailyTotal },
-      percEnrolment: { m: percEnrolmentMale, f: percEnrolmentFemale, t: percEnrolmentTotal },
-      percAttendance: { m: percAttendanceMale, f: percAttendanceFemale, t: percAttendanceTotal },
-      absent5Consecutive: { m: absent5ConsecMale, f: absent5ConsecFemale, t: absent5ConsecTotal },
-      transferredOut: { m: transOutMale, f: transOutFemale, t: transOutTotal },
-      transferredIn: { m: transInMale, f: transInFemale, t: transInTotal }
+      // DISPLAY ONLY. Never used in any computation below/elsewhere.
+      enrolmentJune: {
+        m: enrolmentJuneMale,
+        f: enrolmentJuneFemale,
+        t: enrolmentJuneTotal
+      },
+
+      lateEnroll: {
+        m: lateEnrollMale,
+        f: lateEnrollFemale,
+        t: lateEnrollTotal
+      },
+
+      registered: {
+        m: registeredMale,
+        f: registeredFemale,
+        t: registeredTotal
+      },
+
+      totalDailyAttendance: {
+        m: totalPresentMale,
+        f: totalPresentFemale,
+        t: totalDailyAttendance
+      },
+
+      numberOfSchoolDays,
+
+      // b. Average Daily Attendance
+      avgAttendance: {
+        m: avgDailyMale,
+        f: avgDailyFemale,
+        t: avgDailyTotal
+      },
+
+      // c. Percentage of Attendance
+      percAttendance: {
+        m: percAttendanceMale,
+        f: percAttendanceFemale,
+        t: percAttendanceTotal
+      },
+
+      absent5Consecutive: {
+        m: absent5ConsecMale,
+        f: absent5ConsecFemale,
+        t: absent5ConsecTotal
+      },
+
+      transferredOut: {
+        m: transOutMale,
+        f: transOutFemale,
+        t: transOutTotal
+      },
+
+      transferredIn: {
+        m: transInMale,
+        f: transInFemale,
+        t: transInTotal
+      }
     };
-  }, [currentMonthData, schoolDaysInMonth, sortedStudents, selectedMonthKey, allSchoolDaysOfYear, students]);
+  }, [
+    currentMonthData,
+    schoolDaysInMonth,
+    sortedStudents,
+    selectedMonthKey,
+    allSchoolDaysOfYear,
+    students
+  ]);
 
   const monthlyTotals = useMemo(() => {
     if (!currentMonthData || !schoolDaysInMonth.length) {
@@ -1175,7 +1744,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
     let maleAbsent = 0;
     let malePresent = 0;
     sortedStudents.male.forEach(s => {
-      const dailyData = s.dailyAttendance?.[selectedMonthKey] || s.dailyAttendance?.[currentMonthData.month] || {};
+      const dailyData = getMonthlyAttendance(s);
       let p = 0;
       schoolDaysInMonth.forEach(d => {
         if (dailyData[d.day]) p++;
@@ -1188,7 +1757,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
     let femaleAbsent = 0;
     let femalePresent = 0;
     sortedStudents.female.forEach(s => {
-      const dailyData = s.dailyAttendance?.[selectedMonthKey] || s.dailyAttendance?.[currentMonthData.month] || {};
+      const dailyData = getMonthlyAttendance(s);
       let p = 0;
       schoolDaysInMonth.forEach(d => {
         if (dailyData[d.day]) p++;
@@ -1219,6 +1788,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
 
     const xlData: any[][] = [];
     const rowTypes: string[] = [];
+    const studentRowStudents: Record<number, Student> = {};
 
     // Title banner
     xlData.push([`DAILY ATTENDANCE REPORT OF LEARNERS`]);
@@ -1255,10 +1825,10 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
     xlData.push(metaRow2);
     rowTypes.push("metadata");
 
-    // Header metadata row 3: Report Month, Term, Grade Level, Section
+    // Header metadata row 3: Report Month, Grade Level, Section
     const metaRow3 = Array(tableWidth).fill("");
     metaRow3[c1] = `  Report Month: ${currentMonthData.month}`;
-    metaRow3[c2] = `  Term: ${currentMonthData.term || '1'}`;
+    metaRow3[c2] = '';
     metaRow3[c3] = `  Grade Level: ${section.gradeLevel}`;
     metaRow3[c4] = `  Section: ${section.name}`;
     xlData.push(metaRow3);
@@ -1293,7 +1863,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
     rowTypes.push("maleHeader");
 
     sortedStudents.male.forEach((s, i) => {
-      const dailyData = s.dailyAttendance?.[selectedMonthKey] || s.dailyAttendance?.[currentMonthData!.month] || {};
+      const dailyData = getMonthlyAttendance(s);
       const row = [i + 1, formatStudentName(s)];
       let presentCount = 0;
       schoolDaysInMonth.forEach(dayInfo => {
@@ -1305,29 +1875,13 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
       const totalCount = absentCount + presentCount;
 
       let remarksText = "";
-      if (s.status === 'Dropped Out') {
-        const dParts = s.dropoutDate?.split('-');
-        if (dParts?.length === 3) {
-          const dropYear = parseInt(dParts[0]);
-          const dropMonth = parseInt(dParts[1]) - 1;
-          if (currentMonthData!.year === dropYear && monthIndices[currentMonthData!.month] === dropMonth) {
-            remarksText = `D/O: ${((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(s.dropoutDate!)(undefined, { month: 'short', day: 'numeric' })}`;
-          }
-        }
-      } else if (s.status === 'Transferred Out') {
-        const dParts = s.dropoutDate?.split('-');
-        if (dParts?.length === 3) {
-          const dropYear = parseInt(dParts[0]);
-          const dropMonth = parseInt(dParts[1]) - 1;
-          if (currentMonthData!.year === dropYear && monthIndices[currentMonthData!.month] === dropMonth) {
-            remarksText = `T/O to: ${s.transferredTo || ''}`;
-          }
-        }
-      }
+      const exitRemark = getMonthlyExitRemark(s);
+      if (exitRemark) remarksText = exitRemark.text;
 
       row.push(absentCount > 0 ? absentCount : 0, presentCount, totalCount, remarksText);
       xlData.push(row);
       rowTypes.push("studentRow");
+      studentRowStudents[xlData.length - 1] = s;
     });
 
     // Total Male row
@@ -1335,7 +1889,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
     schoolDaysInMonth.forEach(dayInfo => {
       let dailyAbsentCount = 0;
       sortedStudents.male.forEach(s => {
-        const dailyData = s.dailyAttendance?.[selectedMonthKey] || s.dailyAttendance?.[currentMonthData!.month] || {};
+        const dailyData = getMonthlyAttendance(s);
         if (!dailyData[dayInfo.day]) {
           dailyAbsentCount++;
         }
@@ -1356,7 +1910,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
     rowTypes.push("femaleHeader");
 
     sortedStudents.female.forEach((s, i) => {
-      const dailyData = s.dailyAttendance?.[selectedMonthKey] || s.dailyAttendance?.[currentMonthData!.month] || {};
+      const dailyData = getMonthlyAttendance(s);
       const row = [i + 1, formatStudentName(s)];
       let presentCount = 0;
       schoolDaysInMonth.forEach(dayInfo => {
@@ -1368,29 +1922,13 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
       const totalCount = absentCount + presentCount;
 
       let remarksText = "";
-      if (s.status === 'Dropped Out') {
-        const dParts = s.dropoutDate?.split('-');
-        if (dParts?.length === 3) {
-          const dropYear = parseInt(dParts[0]);
-          const dropMonth = parseInt(dParts[1]) - 1;
-          if (currentMonthData!.year === dropYear && monthIndices[currentMonthData!.month] === dropMonth) {
-            remarksText = `D/O: ${((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(s.dropoutDate!)(undefined, { month: 'short', day: 'numeric' })}`;
-          }
-        }
-      } else if (s.status === 'Transferred Out') {
-        const dParts = s.dropoutDate?.split('-');
-        if (dParts?.length === 3) {
-          const dropYear = parseInt(dParts[0]);
-          const dropMonth = parseInt(dParts[1]) - 1;
-          if (currentMonthData!.year === dropYear && monthIndices[currentMonthData!.month] === dropMonth) {
-            remarksText = `T/O to: ${s.transferredTo || ''}`;
-          }
-        }
-      }
+      const exitRemark = getMonthlyExitRemark(s);
+      if (exitRemark) remarksText = exitRemark.text;
 
       row.push(absentCount > 0 ? absentCount : 0, presentCount, totalCount, remarksText);
       xlData.push(row);
       rowTypes.push("studentRow");
+      studentRowStudents[xlData.length - 1] = s;
     });
 
     // Total Female row
@@ -1398,7 +1936,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
     schoolDaysInMonth.forEach(dayInfo => {
       let dailyAbsentCount = 0;
       sortedStudents.female.forEach(s => {
-        const dailyData = s.dailyAttendance?.[selectedMonthKey] || s.dailyAttendance?.[currentMonthData!.month] || {};
+        const dailyData = getMonthlyAttendance(s);
         if (!dailyData[dayInfo.day]) {
           dailyAbsentCount++;
         }
@@ -1414,7 +1952,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
     schoolDaysInMonth.forEach(dayInfo => {
       let dailyAbsentCount = 0;
       students.forEach(s => {
-        const dailyData = s.dailyAttendance?.[selectedMonthKey] || s.dailyAttendance?.[currentMonthData!.month] || {};
+        const dailyData = getMonthlyAttendance(s);
         if (!dailyData[dayInfo.day]) {
           dailyAbsentCount++;
         }
@@ -1444,7 +1982,6 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
         ["Enrolment as of (1st Friday of June)", summaryData.enrolmentJune.m, summaryData.enrolmentJune.f, summaryData.enrolmentJune.t],
         ["Late Enrollment during the month (beyond cut-off)", summaryData.lateEnroll.m, summaryData.lateEnroll.f, summaryData.lateEnroll.t],
         ["Registered Learner as of end of month", summaryData.registered.m, summaryData.registered.f, summaryData.registered.t],
-        ["Percentage of Enrolment", `${summaryData.percEnrolment.m.toFixed(2)}%`, `${summaryData.percEnrolment.f.toFixed(2)}%`, `${summaryData.percEnrolment.t.toFixed(2)}%`],
         ["Average Daily Attendance", summaryData.avgAttendance.m.toFixed(2), summaryData.avgAttendance.f.toFixed(2), summaryData.avgAttendance.t.toFixed(2)],
         ["Percentage of Attendance", `${summaryData.percAttendance.m.toFixed(2)}%`, `${summaryData.percAttendance.f.toFixed(2)}%`, `${summaryData.percAttendance.t.toFixed(2)}%`],
         ["Absent 5+ Consecutive Days", summaryData.absent5Consecutive.m, summaryData.absent5Consecutive.f, summaryData.absent5Consecutive.t],
@@ -1738,7 +2275,12 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
                 cell.s = styleNameCell;
               } else if (C >= 2 && C < tableWidth - 4) {
                 // Presence/Absence marker
-                if (cell.v === "X") {
+                const studentForRow = studentRowStudents[R];
+                const dayInfo = schoolDaysInMonth[C - 2];
+                const isShaded = !!studentForRow && !!dayInfo && isAttendanceCellShaded(studentForRow, dayInfo);
+                if (isShaded) {
+                  cell.s = { ...cellBaseStyle, fill: { fgColor: { rgb: "475569" } }, font: { name: "Arial", sz: 9, color: { rgb: "475569" } } };
+                } else if (cell.v === "X") {
                   cell.s = {
                     ...cellBaseStyle,
                     font: { name: "Arial", sz: 9, bold: true, color: { rgb: "DC2626" } }, // Bright Red
@@ -1856,7 +2398,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
   };
 
   const renderStudentRowModal = (student: Student, index: number) => {
-    const dailyData = student.dailyAttendance?.[selectedMonthKey] || student.dailyAttendance?.[currentMonthData!.month] || {};
+    const dailyData = getMonthlyAttendance(student);
     let presentCount = 0;
     
     // We only count actual marked presence in the defined school days
@@ -1872,21 +2414,27 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
 
     return (
       <tr key={`modal-row-${student.id || index}-${index}`} className="text-[9px] h-[22px] leading-tight transition-none">
-        <td className="border border-black p-0.5 text-center font-bold h-[22px] leading-none">{index + 1}</td>
+        <td className="border border-black whitespace-pre-line p-0.5 text-center font-bold h-[22px] leading-none">{index + 1}</td>
         <td className="border border-black px-1.5 py-0.5 font-bold text-[7.5pt] whitespace-nowrap leading-none h-[22px]">
           <div className="flex flex-col">
             <span>{formatStudentName(student)}</span>
-            {(student.status === 'Dropped Out' || student.status === 'Transferred Out') && (
-              <span className="text-[5.5px] uppercase font-black text-red-600">({student.status === 'Dropped Out' ? 'Dropped' : 'Transferred'})</span>
-            )}
+            {(() => {
+              const exitRemark = getMonthlyExitRemark(student);
+              return exitRemark ? (
+                <span className={`text-[5.5px] uppercase font-black mt-0.5 leading-tight ${exitRemark.colorClass}`}>
+                  {exitRemark.text}
+                </span>
+              ) : null;
+            })()}
           </div>
         </td>
         {schoolDaysInMonth.map((dayInfo, dIdx) => {
            const isPresent = !!dailyData[dayInfo.day];
+           const isShaded = isAttendanceCellShaded(student, dayInfo);
            return (
-             <td key={`m-att-${student.id || index}-${dayInfo.dateStr || dIdx}`} className="border border-black p-0 text-center min-w-[15px] h-[22px] align-middle">
+             <td key={`m-att-${student.id || index}-${dayInfo.dateStr || dIdx}`} className={`border border-black p-0 text-center min-w-[15px] h-[22px] align-middle ${isShaded ? '!bg-slate-700 !text-slate-700' : 'bg-white'}`}>
                <div className="flex items-center justify-center h-full w-full">
-                 {!isPresent ? <span className="font-bold text-red-600 leading-none text-[8.5px]">X</span> : <span className="text-slate-300 leading-none text-[8px]">.</span>}
+                 {isShaded ? <span className="text-slate-700 leading-none">&nbsp;</span> : !isPresent ? <span className="font-bold text-red-600 leading-none text-[8.5px]">X</span> : <span className="text-slate-300 leading-none text-[8px]">.</span>}
                </div>
              </td>
            );
@@ -1897,47 +2445,29 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
         <td className="border border-black p-0.5 text-center font-bold bg-white leading-none h-[22px] text-[8.5px] text-red-700">{absentCount > 0 ? absentCount : 0}</td>
         <td className="border border-black p-0.5 text-center font-bold bg-white leading-none h-[22px] text-[8.5px] text-emerald-700">{presentCount}</td>
         <td className="border border-black p-0.5 text-center font-bold bg-slate-50 leading-none h-[22px] text-[8.5px]">{absentCount + presentCount}</td>
-        <td className="border border-black px-1 py-0.5 truncate max-w-[160px] text-[7.5px] h-[22px] leading-none font-semibold">
-          {student.status === 'Dropped Out' && (() => {
-            const dParts = student.dropoutDate?.split('-');
-            if (dParts?.length === 3) {
-              const dropYear = parseInt(dParts[0]);
-              const dropMonth = parseInt(dParts[1]) - 1;
-              if (currentMonthData!.year === dropYear && monthIndices[currentMonthData!.month] === dropMonth) {
-                return <span className="text-red-700">D/O: {((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(student.dropoutDate!)(undefined, { month: 'short', day: 'numeric' })}</span>;
-              }
-            }
-            return null;
-          })()}
-          {student.status === 'Transferred Out' && (() => {
-            const dParts = student.dropoutDate?.split('-');
-            if (dParts?.length === 3) {
-              const dropYear = parseInt(dParts[0]);
-              const dropMonth = parseInt(dParts[1]) - 1;
-              if (currentMonthData!.year === dropYear && monthIndices[currentMonthData!.month] === dropMonth) {
-                return <span className="text-blue-700">T/O: {((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(student.dropoutDate!)(undefined, { month: 'short', day: 'numeric' })}</span>;
-              }
-            }
-            return null;
-          })()}
-          {student.isTransferredIn && (() => {
-            const foaParts = student.dateOfFirstAttendance?.split('-');
-            if (foaParts?.length === 3) {
-              const foaYear = parseInt(foaParts[0]);
-              const foaMonth = parseInt(foaParts[1]) - 1;
-              if (currentMonthData!.year === foaYear && monthIndices[currentMonthData!.month] === foaMonth) {
-                return <span className="text-emerald-700">T/I: {((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(student.dateOfFirstAttendance!)(undefined, { month: 'short', day: 'numeric' })}</span>;
-              }
-            }
-            return null;
-          })()}
+        <td className="border border-black px-1 py-0.5 max-w-[160px] text-[7.5px] h-[22px] leading-tight font-semibold align-top whitespace-pre-line">
+          {(() => {
+      const exitRemark = getMonthlyExitRemark(student);
+      const transferInRemark = getMonthlyStatusRemark(student);
+      const remark = exitRemark || transferInRemark;
+
+      if (!remark) return null;
+
+      return (
+        <span
+          className={`${remark.className} whitespace-pre-line block`}
+        >
+          {String(remark.text)}
+        </span>
+      );
+    })()}
         </td>
       </tr>
     );
   };
 
   const renderStudentRow = (student: Student, index: number) => {
-    const dailyData = student.dailyAttendance?.[selectedMonthKey] || student.dailyAttendance?.[currentMonthData!.month] || {};
+    const dailyData = getMonthlyAttendance(student);
     let presentCount = 0;
     
     // We only count actual marked presence in the defined school days
@@ -1957,17 +2487,26 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
         <td className="border border-black p-1 font-bold text-[7pt] whitespace-nowrap leading-none h-[30px]">
           <div className="flex flex-col">
             <span>{formatStudentName(student)}</span>
-            {(student.status === 'Dropped Out' || student.status === 'Transferred Out') && (
-              <span className="text-[6px] uppercase font-black text-red-600">({student.status === 'Dropped Out' ? 'Dropped' : 'Transferred'})</span>
-            )}
+            {(() => {
+              const exitRemark = getMonthlyExitRemark(student);
+              const transferInRemark = getMonthlyStatusRemark(student);
+              const remark = exitRemark || transferInRemark;
+
+              return remark ? (
+                <span className={`text-[6px] uppercase font-black mt-0.5 leading-tight whitespace-pre-line block ${remark.colorClass}`}>
+                  {String(remark.text)}
+                </span>
+              ) : null;
+            })()}
           </div>
         </td>
         {schoolDaysInMonth.map((dayInfo, dIdx) => {
            const isPresent = !!dailyData[dayInfo.day];
+           const isShaded = isAttendanceCellShaded(student, dayInfo);
            return (
-             <td key={`att-${student.id || index}-${dayInfo.dateStr || dIdx}`} className="border border-black p-0 text-center min-w-[1.2rem] h-[30px] align-middle">
+             <td key={`att-${student.id || index}-${dayInfo.dateStr || dIdx}`} className={`border border-black p-0 text-center min-w-[1.2rem] h-[30px] align-middle ${isShaded ? '!bg-slate-700 !text-slate-700' : 'bg-white'}`}>
                <div className="flex items-center justify-center h-full w-full">
-                 {!isPresent ? <span className="font-bold text-red-600 leading-none">X</span> : <span className="text-slate-300 leading-none">.</span>}
+                 {isShaded ? <span className="text-slate-700 leading-none">&nbsp;</span> : !isPresent ? <span className="font-bold text-red-600 leading-none">X</span> : <span className="text-slate-300 leading-none">.</span>}
                </div>
              </td>
            );
@@ -1978,38 +2517,20 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
         <td className="border border-black p-1 text-center font-bold bg-white leading-none h-[30px] text-red-700">{absentCount > 0 ? absentCount : 0}</td>
         <td className="border border-black p-1 text-center font-bold bg-white leading-none h-[30px] text-emerald-700">{presentCount}</td>
         <td className="border border-black p-1 text-center font-bold bg-slate-100 leading-none h-[30px]">{absentCount + presentCount}</td>
-        <td className="border border-black p-1 truncate max-w-[150px] text-[8px] h-[30px] leading-tight font-medium">
-          {student.status === 'Dropped Out' && (() => {
-            const dParts = student.dropoutDate?.split('-');
-            if (dParts?.length === 3) {
-              const dropYear = parseInt(dParts[0]);
-              const dropMonth = parseInt(dParts[1]) - 1;
-              if (currentMonthData.year === dropYear && monthIndices[currentMonthData.month] === dropMonth) {
-                return <span className="text-red-700">DROPPED: {((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(student.dropoutDate!)(undefined, { month: 'short', day: 'numeric' })}{student.dropoutReason ? ` - ${student.dropoutReason}` : ''}</span>;
-              }
+        <td className="border border-black p-1 max-w-[150px] text-[8px] h-[30px] leading-tight font-medium align-top whitespace-pre-line">
+          {(() => {
+            const exitRemark = getMonthlyExitRemark(student);
+            const transferInRemark = getMonthlyStatusRemark(student);
+            const remark = exitRemark || transferInRemark;
+
+            if (remark) {
+              return (
+                <span className={`${remark.colorClass} whitespace-pre-line block`}>
+                  {String(remark.text)}
+                </span>
+              );
             }
-            return null;
-          })()}
-          {student.status === 'Transferred Out' && (() => {
-            const dParts = student.dropoutDate?.split('-');
-            if (dParts?.length === 3) {
-              const dropYear = parseInt(dParts[0]);
-              const dropMonth = parseInt(dParts[1]) - 1;
-              if (currentMonthData.year === dropYear && monthIndices[currentMonthData.month] === dropMonth) {
-                return <span className="text-blue-700">T/O: {((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(student.dropoutDate!)(undefined, { month: 'short', day: 'numeric' })}{student.dropoutReason ? ` - ${student.dropoutReason}` : ''}</span>;
-              }
-            }
-            return null;
-          })()}
-          {student.isTransferredIn && (() => {
-            const foaParts = student.dateOfFirstAttendance?.split('-');
-            if (foaParts?.length === 3) {
-              const foaYear = parseInt(foaParts[0]);
-              const foaMonth = parseInt(foaParts[1]) - 1;
-              if (currentMonthData.year === foaYear && monthIndices[currentMonthData.month] === foaMonth) {
-                return <span className="text-emerald-700">T/I: {((d: any) => { try { const dt = new Date(d?.seconds ? d.seconds * 1000 : (typeof d?.toDate === "function" ? d.toDate() : d)); return isNaN(dt.getTime()) ? (() => "Unknown Date") : dt.toLocaleDateString.bind(dt); } catch(e) { return () => "Unknown Date"; } })(student.dateOfFirstAttendance!)(undefined, { month: 'short', day: 'numeric' })}</span>;
-              }
-            }
+
             return null;
           })()}
         </td>
@@ -2057,39 +2578,42 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
       {!isPrintMode && (
         <div className="p-6 border-b border-slate-100 flex flex-col gap-6 print:hidden">
         <div className="flex flex-col lg:flex-row items-stretch gap-4 flex-wrap">
-          {Array.from(new Set(monthsList.map(m => m.term))).sort().map(term => (
-            <div key={term} className="flex flex-col gap-2 p-3 border border-slate-200 rounded-2xl bg-slate-50/50 flex-1 min-w-[200px]">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-1 mb-1">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Term {term}</span>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-2">
-                {monthsList.filter(m => m.term === term).map(m => {
-                  const calendarEntry = calendar.find(c => c.month === m.month && c.schoolYear === section.schoolYear && (c.term || '1').toString() === m.term);
-                  const schoolDaysCount = calendarEntry?.days || 0;
-                  const isSelected = selectedMonthKey === m.key;
-                  
-                  return (
-                    <button 
-                      key={m.key} 
-                      onClick={() => setSelectedMonthKey(m.key)}
-                      className={`group relative flex flex-col items-center justify-center p-2 rounded-xl text-center transition-all ${
-                        isSelected 
-                          ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-600 ring-offset-2' 
-                          : 'bg-white border border-slate-200 text-slate-700 hover:border-indigo-300 hover:bg-indigo-50/30'
-                      }`}
-                    >
-                      <span className={`text-[11px] font-black uppercase tracking-tight ${isSelected ? 'text-white' : 'text-slate-900 group-hover:text-indigo-700'}`}>
-                        {m.month}
-                      </span>
-                      <span className={`text-[9px] font-bold mt-0.5 ${isSelected ? 'text-indigo-100' : 'text-slate-400'}`}>
-                        Days: {schoolDaysCount}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
+          <div className="w-full flex flex-col gap-2 p-3 border border-slate-200 rounded-2xl bg-slate-50/50">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-1 mb-1">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">School Months</span>
+              <span className="text-[9px] font-bold text-slate-400">One entry per month</span>
             </div>
-          ))}
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
+              {monthsList.map(m => {
+                // Sum all term portions for the month. This gives one
+                // combined school-day count when Term 1 and Term 2 share
+                // the same calendar month.
+                const schoolDaysCount = calendar
+                  .filter(c => c.month === m.month && c.schoolYear === section.schoolYear)
+                  .reduce((sum, c) => sum + (parseInt(c.days) || 0), 0);
+                const isSelected = selectedMonthKey === m.key;
+
+                return (
+                  <button
+                    key={m.key}
+                    onClick={() => setSelectedMonthKey(m.key)}
+                    className={`group relative flex flex-col items-center justify-center p-2 rounded-xl text-center transition-all ${
+                      isSelected
+                        ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-600 ring-offset-2'
+                        : 'bg-white border border-slate-200 text-slate-700 hover:border-indigo-300 hover:bg-indigo-50/30'
+                    }`}
+                  >
+                    <span className={`text-[11px] font-black uppercase tracking-tight ${isSelected ? 'text-white' : 'text-slate-900 group-hover:text-indigo-700'}`}>
+                      {m.month}
+                    </span>
+                    <span className={`text-[9px] font-bold mt-0.5 ${isSelected ? 'text-indigo-100' : 'text-slate-400'}`}>
+                      Days: {schoolDaysCount || schoolDaysInMonth.length}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </div>
       )}
@@ -2130,7 +2654,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
                  <div className="flex gap-2 flex-grow min-w-[300px]"><span>School Name:</span> <span className="border-b border-black flex-1 text-center">{section.schoolName || ''}</span></div>
                  <div className="flex gap-2 min-w-[200px]"><span>Adviser Name:</span> <span className="border-b border-black flex-1 text-center">{section.adviserName || ''}</span></div>
                  <div className="flex gap-2 min-w-[120px]"><span>School Year:</span> <span className="border-b border-black flex-1 text-center">{section.schoolYear || ''}</span></div>
-                 <div className="flex gap-2 min-w-[200px]"><span>Report for the Month of:</span> <span className="border-b border-black flex-1 text-center text-indigo-700">{currentMonthData.month} (Term {currentMonthData.term})</span></div>
+                 <div className="flex gap-2 min-w-[200px]"><span>Report for the Month of:</span> <span className="border-b border-black flex-1 text-center text-indigo-700">{currentMonthData.month}</span></div>
                  <div className="w-full flex gap-2"></div>
                  <div className="flex gap-2 min-w-[300px]"><span>Grade Level & Section:</span> <span className="border-b border-black flex-1 text-center">{section.gradeLevel} - {section.name}</span></div>
                </div>
@@ -2188,7 +2712,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
                       {schoolDaysInMonth.map(dayInfo => {
                          let totalMaleAbsent = 0;
                          sortedStudents.male.forEach(student => {
-                             const data = student.dailyAttendance?.[selectedMonthKey] || student.dailyAttendance?.[currentMonthData!.month] || {};
+                             const data = getMonthlyAttendance(student);
                              if (!data[dayInfo.day]) totalMaleAbsent++;
                          });
                          return <td key={`male-tot-${dayInfo.day}`} className="border border-black p-1 text-center font-bold bg-slate-50 text-[9px]">{totalMaleAbsent || ''}</td>;
@@ -2212,7 +2736,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
                       {schoolDaysInMonth.map(dayInfo => {
                          let totalFemaleAbsent = 0;
                          sortedStudents.female.forEach(student => {
-                             const data = student.dailyAttendance?.[selectedMonthKey] || student.dailyAttendance?.[currentMonthData!.month] || {};
+                             const data = getMonthlyAttendance(student);
                              if (!data[dayInfo.day]) totalFemaleAbsent++;
                          });
                          return <td key={`female-tot-${dayInfo.day}`} className="border border-black p-1 text-center font-bold bg-slate-50 text-[9px]">{totalFemaleAbsent || ''}</td>;
@@ -2232,7 +2756,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
                       {schoolDaysInMonth.map(dayInfo => {
                          let totalAbsent = 0;
                          students.forEach(student => {
-                             const data = student.dailyAttendance?.[selectedMonthKey] || student.dailyAttendance?.[currentMonthData!.month] || {};
+                             const data = getMonthlyAttendance(student);
                              if (!data[dayInfo.day]) totalAbsent++;
                          });
                          return <td key={`total-${dayInfo.day}`} className="border border-black p-1 text-center font-black bg-slate-200 text-[9px]">{totalAbsent || ''}</td>;
@@ -2253,7 +2777,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
                  <div>
                    <table className="w-full border-collapse border border-black mb-4">
                      <thead>
-                       <tr><th colSpan={4} className="border border-black p-1 text-left uppercase text-indigo-700">Month: {currentMonthData.month} (Term {currentMonthData.term})</th></tr>
+                       <tr><th colSpan={4} className="border border-black p-1 text-left uppercase text-indigo-700">Month: {currentMonthData.month}</th></tr>
                        <tr>
                          <th className="border border-black p-1">No. of Days of Classes:</th>
                          <th colSpan={2} className="border border-black p-1 text-center text-lg">{schoolDaysInMonth.length}</th>
@@ -2283,12 +2807,6 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
                          <td className="border border-black p-1 text-center font-bold">{summaryData?.registered.m}</td>
                          <td className="border border-black p-1 text-center font-bold">{summaryData?.registered.f}</td>
                          <td className="border border-black p-1 text-center font-bold text-lg">{summaryData?.registered.t}</td>
-                       </tr>
-                       <tr>
-                         <td className="border border-black p-1 font-bold italic text-xs">Percentage of Enrolment as of end of the month</td>
-                         <td className="border border-black p-1 text-center font-bold">{summaryData?.percEnrolment.m.toFixed(2)}%</td>
-                         <td className="border border-black p-1 text-center font-bold">{summaryData?.percEnrolment.f.toFixed(2)}%</td>
-                         <td className="border border-black p-1 text-center font-bold">{summaryData?.percEnrolment.t.toFixed(2)}%</td>
                        </tr>
                        <tr>
                          <td className="border border-black p-1 font-bold italic text-xs">Average Daily Attendance</td>
@@ -2410,7 +2928,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
                     <div className="flex gap-1 items-end"><span>Grade Level & Section:</span> <span className="border-b border-black flex-1 text-center font-bold pb-0.5">{section.gradeLevel} - {section.name}</span></div>
 
                     <div className="flex gap-1 items-end col-span-2"><span>Adviser Name:</span> <span className="border-b border-black flex-1 text-center font-bold pb-0.5">{section.adviserName || ''}</span></div>
-                    <div className="flex gap-1 items-end col-span-2"><span>Report for the Month of:</span> <span className="border-b border-black flex-1 text-center text-indigo-700 font-bold pb-0.5">{currentMonthData.month} (Term {currentMonthData.term})</span></div>
+                    <div className="flex gap-1 items-end col-span-2"><span>Report for the Month of:</span> <span className="border-b border-black flex-1 text-center text-indigo-700 font-bold pb-0.5">{currentMonthData.month}</span></div>
                   </div>
 
                   {/* Table Section */}
@@ -2467,7 +2985,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
                           {schoolDaysInMonth.map(dayInfo => {
                              let totalMaleAbsent = 0;
                              sortedStudents.male.forEach(student => {
-                                 const data = student.dailyAttendance?.[selectedMonthKey] || student.dailyAttendance?.[currentMonthData.month] || {};
+                                 const data = getMonthlyAttendance(student);
                                  if (!data[dayInfo.day]) totalMaleAbsent++;
                              });
                              return <td key={`m-male-tot-${dayInfo.day}`} className="border border-black p-0.5 text-center font-bold bg-white text-[8px] h-4 align-middle">{totalMaleAbsent || ''}</td>;
@@ -2491,7 +3009,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
                           {schoolDaysInMonth.map(dayInfo => {
                              let totalFemaleAbsent = 0;
                              sortedStudents.female.forEach(student => {
-                                 const data = student.dailyAttendance?.[selectedMonthKey] || student.dailyAttendance?.[currentMonthData.month] || {};
+                                 const data = getMonthlyAttendance(student);
                                  if (!data[dayInfo.day]) totalFemaleAbsent++;
                              });
                              return <td key={`m-female-tot-${dayInfo.day}`} className="border border-black p-0.5 text-center font-bold bg-white text-[8px] h-4 align-middle">{totalFemaleAbsent || ''}</td>;
@@ -2511,7 +3029,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
                           {schoolDaysInMonth.map(dayInfo => {
                              let totalAbsent = 0;
                              students.forEach(student => {
-                                 const data = student.dailyAttendance?.[selectedMonthKey] || student.dailyAttendance?.[currentMonthData!.month] || {};
+                                 const data = getMonthlyAttendance(student);
                                  if (!data[dayInfo.day]) totalAbsent++;
                              });
                              return <td key={`m-total-${dayInfo.day}`} className="border border-black p-0.5 text-center font-black bg-slate-100 text-[8px] h-4 align-middle">{totalAbsent || ''}</td>;
@@ -2547,7 +3065,7 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
                         </thead>
                         <tbody>
                           <tr className="text-[7.5px]">
-                            <td className="border border-black px-1 py-0.5 font-bold italic text-[7px]">* Enrolment as of 1st Friday</td>
+                            <td className="border border-black px-1 py-0.5 font-bold italic text-[7px]">* Enrolment as of (1st Friday of June)</td>
                             <td className="border border-black p-0.5 text-center font-bold">{summaryData?.enrolmentJune.m}</td>
                             <td className="border border-black p-0.5 text-center font-bold">{summaryData?.enrolmentJune.f}</td>
                             <td className="border border-black p-0.5 text-center font-black">{summaryData?.enrolmentJune.t}</td>
@@ -2563,12 +3081,6 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
                             <td className="border border-black p-0.5 text-center font-bold">{summaryData?.registered.m}</td>
                             <td className="border border-black p-0.5 text-center font-bold">{summaryData?.registered.f}</td>
                             <td className="border border-black p-0.5 text-center font-black">{summaryData?.registered.t}</td>
-                          </tr>
-                          <tr className="text-[7.5px]">
-                            <td className="border border-black px-1 py-0.5 font-bold italic text-[7px]">Percentage of Enrolment</td>
-                            <td className="border border-black p-0.5 text-center font-bold">{summaryData?.percEnrolment.m.toFixed(2)}%</td>
-                            <td className="border border-black p-0.5 text-center font-bold">{summaryData?.percEnrolment.f.toFixed(2)}%</td>
-                            <td className="border border-black p-0.5 text-center font-black">{summaryData?.percEnrolment.t.toFixed(2)}%</td>
                           </tr>
                           <tr className="text-[7.5px]">
                             <td className="border border-black px-1 py-0.5 font-bold italic text-[7px]">Average Daily Attendance</td>

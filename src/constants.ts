@@ -18,10 +18,10 @@ export const DEFAULT_TERM_DATA: TermData = {
   },
   summativeTests: { 
     scores: new Array(2).fill(0), 
-    maxScores: new Array(2).fill(0),
+    maxScores: [30, 30],
     names: ["1", "2"]
   },
-  termExam: { score: 0, maxScore: 0 },
+  termExam: { score: 0, maxScore: 60 },
 };
 
 export const INITIAL_STUDENTS: Student[] = [

@@ -86935,7 +86935,7 @@ function Mmt({
                   }), ze && i.jsx("span", {
                     className: "text-[9px] text-slate-400 dark:text-slate-500 mt-0.5 select-none",
                     title: "Weighted score (30% of category)",
-                    children: ((Number((zr = (kr = wr.summativeTests) == null ? void 0 : kr.scores) == null ? void 0 : zr[Re]) || 0) / We * 100).toFixed(1) + "%"
+                    children: ((Number((zr = (kr = wr.summativeTests) == null ? void 0 : kr.scores) == null ? void 0 : zr[Re]) || 0) / We * 30).toFixed(1)
                   })]
                 })
               }, `st-${Re}`);
@@ -86947,7 +86947,7 @@ function Mmt({
                   We = Re > 0,
                   ze = !We || fr || Se || W || se,
                   Vt = Number((wt = wr.termExam) == null ? void 0 : wt.score) || 0,
-                  Wt = We ? (Vt / Re * 100).toFixed(1) + "%" : "-";
+                  Wt = We ? (Vt / Re * 40) : 0;
                 return i.jsxs("div", {
                   className: "flex flex-col items-center justify-center",
                   children: [i.jsx("input", {
@@ -86961,7 +86961,7 @@ function Mmt({
                   }), We && i.jsx("span", {
                     className: "text-[9px] text-slate-400 dark:text-slate-500 mt-0.5 select-none",
                     title: "Weighted score (40% of category)",
-                    children: Wt.toFixed(1)
+                    children: We ? Wt.toFixed(1) + "%" : "-"
                   })]
                 });
               })()
