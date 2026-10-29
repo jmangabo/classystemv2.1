@@ -3062,7 +3062,7 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
           </header>
         </div>
 
-        <div className="w-full space-y-4 px-4 sm:px-6">
+        <div className="w-full space-y-6 px-4 pt-6 pb-12 sm:px-8 sm:pt-8 sm:pb-16">
           {workflowMessage && <p role="status" className="rounded-lg border border-sky-100 bg-sky-50 p-3 text-sm text-sky-800">{workflowMessage}</p>}
           {showTermWeekModal && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-labelledby="term-week-modal-title">
             <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
