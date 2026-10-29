@@ -10985,6 +10985,17 @@ function SectionsView({
       )}
       <header className="h-16 bg-white px-6 md:px-8 flex items-center justify-between shrink-0 gap-4 relative z-50 border-b border-slate-200 shadow-sm print:hidden">
         <div className="flex items-center gap-4 shrink-0">
+          {showILAWLessonPlan && (
+            <button
+              type="button"
+              onClick={() => setShowILAWLessonPlan(false)}
+              title="Back to Institutional Dashboard"
+              aria-label="Back to Institutional Dashboard"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition-colors hover:bg-slate-50 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+            >
+              <ArrowLeft size={20} />
+            </button>
+          )}
           <div className="w-10 h-10 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded-xl flex items-center justify-center shadow-sm">
             <GraduationCap size={22} />
           </div>
@@ -11175,21 +11186,12 @@ function SectionsView({
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto print:overflow-hidden print:h-auto print:block print:p-0 p-12 custom-scrollbar">
-        <div className="max-w-full 2xl:max-w-[1600px] w-full mx-auto space-y-12">
+      <main className={`flex-1 overflow-y-auto print:overflow-hidden print:h-auto print:block print:p-0 ${showILAWLessonPlan ? 'p-0 pt-0' : 'p-12'} custom-scrollbar`}>
+        <div className={showILAWLessonPlan ? 'w-full min-w-0' : 'max-w-full 2xl:max-w-[1600px] w-full mx-auto space-y-12'}>
           {showILAWLessonPlan ? (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowILAWLessonPlan(false)}
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-50"
-                >
-                  <ArrowLeft size={16} /> Back to Institutional Dashboard
-                </button>
-              </div>
+            <div className="w-full min-w-0">
               <style>{`@media print { body * { visibility: hidden !important; } .ilaw-print-page, .ilaw-print-page * { visibility: visible !important; } .ilaw-print-page { position: fixed !important; left: 0 !important; top: 0 !important; width: 100% !important; margin: 0 !important; padding: 0 !important; background: #fff !important; z-index: 2147483647 !important; break-before: page !important; page-break-before: always !important; } .ilaw-print-page button, .ilaw-print-page .no-print { display: none !important; } @page { size: 13in 8.5in; margin: 0.35in; } }`}</style>
-              <div className="ilaw-print-page">
+              <div className="ilaw-print-page w-full min-w-0">
                 <ILAWLessonPlan
                   currentUser={user}
                   assignedSubjects={subjects}
@@ -11244,14 +11246,6 @@ function SectionsView({
                         <span className="text-xs font-semibold text-slate-700">{user?.role?.replace('_', ' ')}</span>
                       </div>
                       <div className="w-px h-8 bg-slate-200 mx-2"></div>
-                       <button
-                         type="button"
-                         onClick={() => setShowILAWLessonPlan(true)}
-                         className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white shadow-sm transition-colors hover:bg-indigo-700"
-                         title="Open ILAW Lesson Plan"
-                       >
-                         <BookOpen size={15} /> ILAW Lesson Plan
-                       </button>
                        <button 
                          onClick={onShowFeedback}
                          className="p-2 bg-white rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-100 transition-all shadow-sm"
@@ -11602,9 +11596,21 @@ function SectionsView({
                     >
                       {Number(g) === 0 ? "Kinder" : `G${g}`}
                     </button>
+                    
                   ))}
                 </div>
+                <div className="flex items-center">
+                  {/* Existing header content */}
 
+                  <button
+                    type="button"
+                    onClick={() => setShowILAWLessonPlan(true)}
+                    className="ml-auto inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white shadow-sm transition-colors hover:bg-indigo-700"
+                    title="Open ILAW Lesson Plan"
+                  >
+                    <BookOpen size={15} /> ILAW Lesson Plan
+                  </button>
+                </div>
                 {user?.role === 'admin' && (
                   <>
                     <div className="w-px h-6 bg-slate-200 mx-1 hidden lg:block"></div>
@@ -22939,7 +22945,7 @@ function DashboardView({
   // Render the ILAW lesson plan as its own page, outside the dashboard layout.
   if (showILAWLessonPlan) {
     return (
-      <div className="ilaw-standalone-page min-h-screen bg-slate-50 p-4 md:p-6">
+      <div className="ilaw-standalone-page min-h-screen bg-slate-50 p-0">
         <style>{`
           @page { size: 13in 8.5in; margin: 0.35in; }
           @media print {
@@ -22951,9 +22957,9 @@ function DashboardView({
             .ilaw-standalone-page * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           }
         `}</style>
-        <div className="no-print mb-4 flex items-center justify-between gap-3">
-          <h1 className="text-lg font-bold text-slate-800">ILAW Lesson Plan</h1>
-          <button type="button" onClick={() => setShowILAWLessonPlan(false)} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-50">
+        <div className="no-print flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-2.5">
+          <h1 className="text-base font-bold text-slate-800">ILAW Lesson Plan</h1>
+          <button type="button" onClick={() => setShowILAWLessonPlan(false)} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50">
             <ArrowLeft size={16} /> Back to My Assigned Subjects
           </button>
         </div>
