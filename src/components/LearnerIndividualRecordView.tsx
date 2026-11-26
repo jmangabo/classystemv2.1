@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Download, Loader2, BookOpen, User } from 'lucide-react';
+import { ChevronDown, Download, Loader2, BookOpen, User, Search, UserCheck } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas-pro';
 import { collection, query, where } from 'firebase/firestore';
@@ -59,6 +59,7 @@ export const LearnerIndividualRecordView: React.FC<LearnerIndividualRecordViewPr
 }) => {
   const recordRef = useRef<HTMLDivElement>(null);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const [schoolDetails, setSchoolDetails] = useState<{
     name?: string;
@@ -230,6 +231,16 @@ export const LearnerIndividualRecordView: React.FC<LearnerIndividualRecordViewPr
       setSelectedStudentId(sortedStudents[0].id);
     }
   }, [sortedStudents, selectedStudentId]);
+
+  const filteredSidebarStudents = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return sortedStudents;
+    return sortedStudents.filter((s) => {
+      const name = formatStudentName(s).toLowerCase();
+      const lrn = String(s.lrn || '').toLowerCase();
+      return name.includes(q) || lrn.includes(q);
+    });
+  }, [sortedStudents, searchQuery]);
 
   const selectedStudent = useMemo(
     () => sortedStudents.find((s) => s.id === selectedStudentId) || sortedStudents[0] || null,
@@ -477,36 +488,33 @@ export const LearnerIndividualRecordView: React.FC<LearnerIndividualRecordViewPr
   }
 
   return (
-    <div className="min-h-full bg-slate-50 p-4 sm:p-6 md:p-8 space-y-6">
-      {/* Top Filter & Action Bar */}
-      <div className="max-w-[1160px] mx-auto bg-white rounded-xl border border-slate-200 shadow-xs px-4 sm:px-6 py-3.5 flex flex-col md:flex-row md:items-center justify-between gap-4 print:hidden">
-        <div className="flex flex-wrap items-center gap-4 sm:gap-7">
-          {/* Learner Selector */}
-          <div className="relative min-w-[200px] sm:min-w-[230px]">
-            <select
-              aria-label="Select Learner"
-              value={selectedStudent?.id || ''}
-              onChange={(e) => setSelectedStudentId(e.target.value)}
-              className="w-full appearance-none bg-transparent border-b border-slate-200 focus:border-blue-600 py-1.5 pr-7 text-sm font-medium text-slate-800 outline-none cursor-pointer"
-            >
-              {sortedStudents.length === 0 ? (
-                <option value="">No learners available</option>
-              ) : (
-                sortedStudents.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {formatStudentName(s)}
-                  </option>
-                ))
-              )}
-            </select>
-            <ChevronDown
-              size={14}
-              className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400"
-            />
+    <div className="flex flex-col bg-slate-50 min-h-screen">
+      {/* Standardized Sticky Header */}
+      <div className="bg-white border-b border-slate-200 px-6 md:px-10 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0 shadow-sm sticky top-0 z-40 print:hidden">
+        <div className="flex items-center gap-4 min-w-0">
+          <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center border border-indigo-100 shrink-0">
+            <UserCheck size={20} />
           </div>
+          <div className="min-w-0">
+            <h2 className="text-xl font-bold text-slate-900 tracking-tight leading-tight">
+              Learner&apos;s Individual Record
+            </h2>
+            <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mt-0.5 truncate">
+              {selectedSection
+                ? `${selectedSection.name} • ${
+                    Number(selectedSection.gradeLevel) === 0
+                      ? 'Kindergarten'
+                      : `Grade ${selectedSection.gradeLevel}`
+                  }`
+                : 'Assigned Subject Performance'}
+              {selectedSubject?.name ? ` • ${selectedSubject.name}` : ''} • Term {localTerm}
+            </p>
+          </div>
+        </div>
 
+        <div className="flex flex-wrap items-center gap-3 shrink-0">
           {/* Assigned Subject Selector */}
-          <div className="relative min-w-[160px] sm:min-w-[190px]">
+          <div className="relative min-w-[170px] sm:min-w-[200px]">
             <select
               aria-label="Select Assigned Subject"
               value={selectedSubject?.id || ''}
@@ -515,7 +523,7 @@ export const LearnerIndividualRecordView: React.FC<LearnerIndividualRecordViewPr
                 setLocalSubjectId(nextId);
                 onSelectSubject?.(nextId);
               }}
-              className="w-full appearance-none bg-transparent border-b border-slate-200 focus:border-blue-600 py-1.5 pr-7 text-sm font-medium text-slate-800 outline-none cursor-pointer"
+              className="w-full appearance-none bg-slate-50 border border-slate-200 hover:border-indigo-300 focus:border-indigo-500 rounded-xl px-3.5 py-2 pr-8 text-xs font-bold text-slate-700 outline-none cursor-pointer transition-colors"
             >
               {assignedSubjects.map((subj) => (
                 <option key={subj.id} value={subj.id}>
@@ -525,12 +533,12 @@ export const LearnerIndividualRecordView: React.FC<LearnerIndividualRecordViewPr
             </select>
             <ChevronDown
               size={14}
-              className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400"
+              className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400"
             />
           </div>
 
           {/* Term Selector */}
-          <div className="relative min-w-[110px] sm:min-w-[130px]">
+          <div className="relative min-w-[115px] sm:min-w-[130px]">
             <select
               aria-label="Select Term"
               value={localTerm}
@@ -539,7 +547,7 @@ export const LearnerIndividualRecordView: React.FC<LearnerIndividualRecordViewPr
                 setLocalTerm(nextTerm);
                 onTermChange?.(nextTerm);
               }}
-              className="w-full appearance-none bg-transparent border-b border-slate-200 focus:border-blue-600 py-1.5 pr-7 text-sm font-medium text-slate-800 outline-none cursor-pointer"
+              className="w-full appearance-none bg-slate-50 border border-slate-200 hover:border-indigo-300 focus:border-indigo-500 rounded-xl px-3.5 py-2 pr-8 text-xs font-bold text-slate-700 outline-none cursor-pointer transition-colors"
             >
               {availableTerms.map((term) => (
                 <option key={term} value={term}>
@@ -549,42 +557,106 @@ export const LearnerIndividualRecordView: React.FC<LearnerIndividualRecordViewPr
             </select>
             <ChevronDown
               size={14}
-              className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400"
+              className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400"
             />
           </div>
-        </div>
 
-        <div className="flex items-center justify-end">
           <button
             type="button"
             onClick={handleDownloadPdf}
             disabled={isExportingPdf || !selectedStudent || !selectedSubject}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold uppercase tracking-wider shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
           >
             {isExportingPdf ? (
-              <Loader2 size={16} className="animate-spin" />
+              <Loader2 size={15} className="animate-spin" />
             ) : (
-              <Download size={16} />
+              <Download size={15} />
             )}
             <span>{isExportingPdf ? 'Generating...' : 'Download PDF'}</span>
           </button>
         </div>
       </div>
 
-      {/* Main Individual Record Sheet */}
-      {!selectedStudent ? (
-        <div className="max-w-[980px] mx-auto bg-white rounded-xl border border-slate-200 p-10 text-center space-y-2">
-          <User size={28} className="mx-auto text-slate-400" />
-          <p className="text-sm font-semibold text-slate-600">
-            No enrolled learners found for this subject.
-          </p>
-        </div>
-      ) : (
-        <div className="overflow-x-auto pb-4">
-          <div
-            ref={recordRef}
-            className="bg-[#ffffff] border-2 border-[#0f172a] p-6 sm:p-9 min-w-[780px] max-w-[980px] mx-auto shadow-sm text-[#0f172a]"
-          >
+      {/* Main Content: Left Learner List + Right Individual Record Sheet */}
+      <div className="p-4 sm:p-6 md:p-8 flex-1">
+        {!selectedStudent ? (
+          <div className="max-w-[1320px] mx-auto bg-white rounded-xl border border-slate-200 p-10 text-center space-y-2">
+            <User size={28} className="mx-auto text-slate-400" />
+            <p className="text-sm font-semibold text-slate-600">
+              No enrolled learners found for this subject.
+            </p>
+          </div>
+        ) : (
+          <div className="max-w-[1320px] mx-auto flex flex-col lg:flex-row items-start gap-6">
+            {/* Left Page: Learner Name List */}
+            <aside className="w-full lg:w-[270px] xl:w-[290px] shrink-0 bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden lg:sticky lg:top-24 print:hidden">
+            <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/70 flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                Learners
+              </span>
+              <span className="text-[11px] font-semibold text-slate-500 bg-slate-200/70 px-2 py-0.5 rounded-full tabular-nums">
+                {sortedStudents.length}
+              </span>
+            </div>
+
+            <div className="p-2.5 border-b border-slate-100">
+              <div className="relative">
+                <Search
+                  size={14}
+                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search learner..."
+                  aria-label="Search learner"
+                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:bg-white text-slate-800 placeholder:text-slate-400"
+                />
+              </div>
+            </div>
+
+            <div className="max-h-[260px] lg:max-h-[calc(100vh-230px)] overflow-y-auto divide-y divide-slate-100">
+              {filteredSidebarStudents.length === 0 ? (
+                <div className="p-6 text-center text-xs text-slate-400">
+                  No matching learners found.
+                </div>
+              ) : (
+                filteredSidebarStudents.map((student) => {
+                  const isActive = student.id === selectedStudent.id;
+                  const rowIndex = sortedStudents.findIndex((s) => s.id === student.id) + 1;
+                  return (
+                    <button
+                      key={student.id}
+                      type="button"
+                      onClick={() => setSelectedStudentId(student.id)}
+                      className={`w-full text-left px-3.5 py-2.5 flex items-center gap-2.5 text-xs transition-colors cursor-pointer ${
+                        isActive
+                          ? 'bg-blue-50 text-blue-700 font-semibold border-l-4 border-l-blue-600'
+                          : 'text-slate-700 hover:bg-slate-50 border-l-4 border-l-transparent'
+                      }`}
+                    >
+                      <span
+                        className={`w-5 shrink-0 text-[11px] tabular-nums ${
+                          isActive ? 'text-blue-600 font-bold' : 'text-slate-400'
+                        }`}
+                      >
+                        {rowIndex}.
+                      </span>
+                      <span className="truncate">{formatStudentName(student)}</span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </aside>
+
+          {/* Right Page: Individual Record Sheet */}
+          <div className="w-full flex-1 min-w-0 overflow-x-auto pb-4">
+            <div
+              ref={recordRef}
+              className="bg-[#ffffff] border-2 border-[#0f172a] p-6 sm:p-9 min-w-[780px] max-w-[980px] mx-auto shadow-sm text-[#0f172a]"
+            >
             {/* Institutional Header */}
             <div className="grid grid-cols-[90px_1fr_110px] items-center gap-4">
               <div className="flex items-center justify-start">
@@ -1007,7 +1079,9 @@ export const LearnerIndividualRecordView: React.FC<LearnerIndividualRecordViewPr
             </div>
           </div>
         </div>
-      )}
+        </div>
+        )}
+      </div>
     </div>
   );
 };
