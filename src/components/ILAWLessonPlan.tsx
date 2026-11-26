@@ -1,13 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, where } from "firebase/firestore";
 import { db } from "../firebase";
-import { BookOpen, Plus, Trash2, Printer, Save, ClipboardCheck, ChevronDown, ChevronUp, Send, CheckCircle2, Upload, Download, RotateCcw, X, ArrowLeft, ArrowRight, Pencil } from "lucide-react";
+import { BookOpen, Plus, Trash2, Printer, Save, ClipboardCheck, ChevronDown, ChevronUp, Send, CheckCircle2, Upload, Download, RotateCcw, HardDrive, Cloud, X, ArrowLeft, ArrowRight, Pencil, Share2 } from "lucide-react";
 
 type Subject = { id?: string; name?: string; subjectName?: string; gradeLevel?: string | number; sectionId?: string; section_id?: string; sectionName?: string; section?: any; teacherId?: string; teacherUid?: string; teacherEmail?: string; assignedTeacherId?: string; assignedTeacherUid?: string; assignedTeacherEmail?: string; [key: string]: any };
 type Section = { id?: string; name?: string; sectionName?: string; gradeLevel?: string | number; subjectName?: string; subject?: any; subjects?: any[]; assignedSubjects?: any[]; [key: string]: any };
 
 type Props = {
   currentUser?: any;
+  currentSchoolYear?: string;
   assignedSubjects?: Subject[];
   globalSubjects?: Subject[];
   sections?: Section[];
@@ -15,10 +17,14 @@ type Props = {
   isSystemAdmin?: boolean;
 };
 
-type Session = { id: string; dateOfInstruction?: string; instructionStatus?: "not-marked" | "executed" | "not-executed"; carryOverFrom?: string; competencyStandards: string; objectives: string; learnerContext: string; preLesson: string; title: string; lessonSubtitleTitle: string; hideLessonSubtitleTitle?: boolean; flow: string; flowSequence?: string; examination: string; summative: string; assessment: string; extendedLearning: string; reflection: string; waysForward: string; coachingNotes: string; lessonMaterialIds?: string[]; assessmentAttachments?: { id: string; name: string; type: string; size?: number; included?: boolean }[] };
+type Session = { id: string; dateOfInstruction?: string; instructionStatus?: "not-marked" | "executed" | "not-executed"; carryOverFrom?: string; competencyStandards: string; objectives: string; learnerContext: string; preLesson: string; title: string; lessonSubtitleTitle: string; hideLessonSubtitleTitle?: boolean; flow: string; flowSequence?: string; examination: string; summative: string; assessment: string; learningResources: string; extendedLearning: string; reflection: string; waysForward: string; coachingNotes: string; lessonMaterialIds?: string[]; assessmentAttachments?: { id: string; name: string; type: string; size?: number; included?: boolean }[] };
 type Plan = {
   lessonTitle: string;
   dateOfInstruction: string;
+  schoolYear?: string;
+  schoolId?: string;
+  schoolName?: string;
+  gradeLevel?: string;
   term: string;
   week: string;
   learningAreas: string;
@@ -64,6 +70,66 @@ const getLessonProperTitle = (plan?: Partial<Plan> | null): string => {
     .map(session => String(session?.lessonSubtitleTitle || "").trim())
     .filter(Boolean)));
   return titles.join(" / ") || String(plan?.lessonTitle || "").trim();
+};
+
+// Validate only the session being submitted. Lesson Information and the two
+// plan-wide Learning Experience fields are shared by all sessions; the remaining
+// requirements are checked against the selected session only.
+const getMissingILAWPartsForSession = (plan: Partial<Plan> | null | undefined, sessionId: string): string[] => {
+  const hasText = (value: unknown) => String(value ?? "").trim().length > 0;
+  const missing: string[] = [];
+  const sharedRequirements: [string, unknown][] = [
+    ["Learning Area/s", plan?.learningAreas],
+    ["Grade Level and Section", plan?.gradeSection],
+    ["Number of Sessions", plan?.noOfSessions],
+    ["References", plan?.references],
+    ["AI Declaration", plan?.aiDeclaration],
+    ["Opportunities for Integration", plan?.integration],
+  ];
+  sharedRequirements.forEach(([label, value]) => {
+    if (!hasText(value)) missing.push(label);
+  });
+
+  const session = (plan?.sessions || []).find(item => item.id === sessionId);
+  if (!session) {
+    missing.push("Selected session");
+    return missing;
+  }
+  const sessionRequirements: [string, unknown][] = [
+    ["Learning Resources", session.learningResources],
+    ["Competency Standards", session.competencyStandards],
+    ["Learning Objectives", session.objectives],
+    ["Learner Context", session.learnerContext],
+    ["Pre-Lesson", session.preLesson],
+    ["Lesson Proper / Flow", session.flow],
+    ["Assessment", session.assessment],
+    ["Ways Forward", session.waysForward],
+    ["Extended Learning", session.extendedLearning],
+  ];
+  sessionRequirements.forEach(([label, value]) => {
+    if (!hasText(value)) missing.push(label);
+  });
+  return missing;
+};
+
+// Keep the overall completion indicator for the weekly editor. Submission itself
+// uses getMissingILAWPartsForSession so each session can be submitted separately.
+const isILAWPartsComplete = (plan?: Partial<Plan> | null): boolean => {
+  const hasText = (value: unknown) => String(value ?? "").trim().length > 0;
+  const sessions = plan?.sessions || [];
+  if (!sessions.length) return false;
+  const lessonExperienceComplete = hasText(plan?.integration);
+  return lessonExperienceComplete && sessions.every(session =>
+    hasText(session.learningResources) &&
+    hasText(session.competencyStandards) &&
+    hasText(session.objectives) &&
+    hasText(session.learnerContext) &&
+    hasText(session.preLesson) &&
+    hasText(session.flow) &&
+    hasText(session.assessment) &&
+    hasText(session.waysForward) &&
+    hasText(session.extendedLearning)
+  );
 };
 
 const FLOW_SEQUENCE_TEMPLATES: Record<string, { label: string; preLesson: string; flow: string; assessment: string }> = {
@@ -174,11 +240,11 @@ const getFlowSequenceTemplate = (key: string, isFilipino: boolean) => {
 };
 
 const makeSession = (id = `session-${Date.now()}`): Session => ({
-  id, dateOfInstruction: "", instructionStatus: "not-marked", carryOverFrom: "", competencyStandards: "", objectives: "", learnerContext: "", preLesson: "", title: "", lessonSubtitleTitle: "", flow: "", flowSequence: "", examination: "", summative: "", assessment: "", extendedLearning: "", reflection: "", waysForward: "", coachingNotes: "", lessonMaterialIds: []
+  id, objectives: "", dateOfInstruction: "", instructionStatus: "not-marked", carryOverFrom: "", competencyStandards: "", learnerContext: "", preLesson: "", title: "", lessonSubtitleTitle: "", flow: "", flowSequence: "", examination: "", summative: "", assessment: "", learningResources: "", extendedLearning: "", reflection: "", waysForward: "", coachingNotes: "", lessonMaterialIds: []
 });
 
 const blankPlan = (): Plan => ({
-  lessonTitle: "", dateOfInstruction: "", term: "1", week: "1", learningAreas: "", teacherNames: "", schoolHeadName: "",
+  lessonTitle: "", dateOfInstruction: "", schoolYear: "", schoolId: "", schoolName: "", gradeLevel: "", term: "1", week: "1", learningAreas: "", teacherNames: "", schoolHeadName: "",
   additionalSignatory1Included: false, additionalSignatory1TeacherId: "", additionalSignatory1Name: "", additionalSignatory1Role: "Master Teacher",
   additionalSignatory2Included: false, additionalSignatory2TeacherId: "", additionalSignatory2Name: "", additionalSignatory2Role: "", gradeSection: "",
   noOfSessions: "", references: "",
@@ -233,6 +299,7 @@ const normalizeStoredPlan = (value: any): Plan => {
       examination: String(stored.examination ?? ""),
       summative: String(stored.summative ?? ""),
       assessment: String(stored.assessment ?? ""),
+      learningResources: String(stored.learningResources ?? (index === 0 ? value?.learningResources : "") ?? ""),
       extendedLearning: String(stored.extendedLearning ?? ""),
       reflection: String(stored.reflection ?? ""),
       waysForward: String(stored.waysForward ?? ""),
@@ -241,7 +308,7 @@ const normalizeStoredPlan = (value: any): Plan => {
     };
   });
   const textKeys: (keyof Omit<Plan, "sessions">)[] = [
-    "lessonTitle", "term", "week", "learningAreas", "teacherNames", "schoolHeadName",
+    "lessonTitle", "schoolYear", "schoolId", "schoolName", "gradeLevel", "term", "week", "learningAreas", "teacherNames", "schoolHeadName",
     "gradeSection", "noOfSessions", "references", "aiDeclaration", "competencyStandards",
     "objectives", "learnerContext", "preLesson", "learningResources", "integration",
     "formativeAssessment", "extendedLearning", "reflections", "coachingNotes"
@@ -253,6 +320,8 @@ const normalizeStoredPlan = (value: any): Plan => {
   });
   // Intention is shared across the whole lesson plan. Migrate older plans that stored
   // these fields only on Session 1 into the plan-level fields without overwriting data.
+  if (!String(sessions[0]?.learningResources || "").trim() && String(base.learningResources || "").trim()) sessions[0].learningResources = String(base.learningResources);
+  base.learningResources = "";
   if (!String(base.competencyStandards || "").trim()) base.competencyStandards = String(sessions[0]?.competencyStandards || "");
   if (!String(base.objectives || "").trim()) base.objectives = String(sessions[0]?.objectives || "");
   if (!String(base.learnerContext || "").trim()) base.learnerContext = String(sessions[0]?.learnerContext || "");
@@ -279,12 +348,12 @@ const hasStoredPlanContent = (value: any): boolean => {
   if (!value || typeof value !== "object") return false;
   const fields = [
     "lessonTitle", "learningAreas", "teacherNames", "gradeSection", "references",
-    "competencyStandards", "objectives", "learnerContext", "preLesson", "learningResources",
+    "competencyStandards", "objectives", "learnerContext", "preLesson",
     "integration", "formativeAssessment", "extendedLearning", "reflections", "coachingNotes"
   ];
   return fields.some(key => String(value[key] ?? "").trim()) ||
     (Array.isArray(value.sessions) && value.sessions.some((session: any) =>
-      ["competencyStandards", "objectives", "learnerContext", "preLesson", "title", "lessonSubtitleTitle", "flow", "examination", "summative", "assessment", "extendedLearning", "reflection", "waysForward", "coachingNotes"]
+      ["competencyStandards", "objectives", "learnerContext", "preLesson", "learningResources", "title", "lessonSubtitleTitle", "flow", "examination", "summative", "assessment", "extendedLearning", "reflection", "waysForward", "coachingNotes"]
         .some(key => String(session?.[key] ?? "").trim())
     ));
 };
@@ -336,6 +405,9 @@ type Submission = {
   plan: Plan;
   teacherName: string;
   teacherEmail: string;
+  schoolId?: string;
+  schoolYear?: string;
+  gradeLevel?: string;
   submittedAt: string;
   status: "pending" | "approved" | "returned";
   reviewerName?: string;
@@ -525,8 +597,44 @@ const saveStoredLessonMaterial = async (material: StoredLessonMaterial): Promise
 };
 const deleteStoredLessonMaterial = async (id: string, owner: string): Promise<void> => { await driveApiRequest("delete", { id, owner }); };
 
-export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], globalSubjects = [], sections = [], isSchoolHead = false, isSystemAdmin: isSystemAdminProp = false }: Props) {
-  type MessageDialogOptions = { title: string; message: string; mode: "info" | "confirm" | "input" | "choice"; inputLabel?: string; initialValue?: string; options?: string[]; confirmLabel?: string; danger?: boolean; requireNonEmptyInput?: boolean };
+const getSchoolYearLabel = (date: Date): string => {
+  const startYear = date.getMonth() >= 5 ? date.getFullYear() : date.getFullYear() - 1;
+  return `${startYear}-${startYear + 1}`;
+};
+
+const normalizeGradeLevelKey = (value: any): string => {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return "";
+  const match = raw.match(/(?:grade\s*)?(k|kindergarten|[1-9]|1[0-2])\b/i);
+  if (match) return match[1].toLowerCase() === "kindergarten" ? "k" : match[1].toLowerCase();
+  return raw.replace(/^grade\s*/i, "").trim();
+};
+
+const getPlanGradeLevel = (plan: Partial<Plan> | any): string => {
+  const explicit = normalizeGradeLevelKey(plan?.gradeLevel || plan?.grade_level || plan?.grade);
+  if (explicit) return explicit;
+  const section = String(plan?.gradeSection || plan?.gradeLevelAndSection || "").trim();
+  return normalizeGradeLevelKey(section);
+};
+
+const getPlanSchoolYear = (plan: Partial<Plan> | any): string => {
+  const explicit = String(plan?.schoolYear || plan?.schoolYearLabel || plan?.school_year || "").trim();
+  if (explicit) {
+    const years = explicit.match(/\d{4}/g);
+    if (years && years.length >= 2) return `${years[0]}-${years[1]}`;
+    if (years && years.length === 1) return `${years[0]}-${Number(years[0]) + 1}`;
+  }
+  const candidateDates = [plan?.dateOfInstruction, ...(Array.isArray(plan?.sessions) ? plan.sessions.map((session: any) => session?.dateOfInstruction) : [])];
+  for (const value of candidateDates) {
+    if (!value) continue;
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return getSchoolYearLabel(parsed);
+  }
+  return "";
+};
+
+export default function ILAWLessonPlan({ currentUser, currentSchoolYear, assignedSubjects = [], globalSubjects = [], sections = [], isSchoolHead = false, isSystemAdmin: isSystemAdminProp = false }: Props) {
+  type MessageDialogOptions = { title: string; message: string; mode: "info" | "confirm" | "input" | "choice" | "select"; inputLabel?: string; initialValue?: string; options?: string[]; confirmLabel?: string; danger?: boolean; requireNonEmptyInput?: boolean };
   const [messageDialog, setMessageDialog] = useState<MessageDialogOptions | null>(null);
   const [messageDialogInput, setMessageDialogInput] = useState("");
   const [assessmentPreview, setAssessmentPreview] = useState<{ url: string; name: string; type: string } | null>(null);
@@ -542,7 +650,7 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     messageDialogResolver.current = null;
     resolve?.(value);
   };
-  const messageWindow = messageDialog ? <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-slate-950/50 p-4" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && messageDialog.mode === "info") closeMessageWindow(true); }}><section role="dialog" aria-modal="true" aria-labelledby="ilaw-message-window-title" className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl"><div className="flex items-start justify-between gap-3"><h2 id="ilaw-message-window-title" className="text-lg font-extrabold text-slate-900">{messageDialog.title}</h2><button type="button" aria-label="Close message" onClick={() => closeMessageWindow(null)} className="rounded-lg p-1 text-slate-500 hover:bg-slate-100"><X size={18}/></button></div><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{messageDialog.message}</p>{messageDialog.mode === "input" && <label className="mt-4 block text-sm font-bold text-slate-700">{messageDialog.inputLabel || "Details"}<textarea autoFocus required={Boolean(messageDialog.requireNonEmptyInput)} aria-required={Boolean(messageDialog.requireNonEmptyInput)} value={messageDialogInput} onChange={event => setMessageDialogInput(event.target.value)} rows={4} placeholder={messageDialog.requireNonEmptyInput ? "Explain why you are requesting this change..." : ""} className="mt-2 w-full rounded-xl border border-slate-300 p-3 text-sm font-normal outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100" />{messageDialog.requireNonEmptyInput && !messageDialogInput.trim() && <p className="mt-1 text-xs font-semibold text-rose-600">A reason is required before you can send this request.</p>}</label>}{messageDialog.mode === "choice" && <label className="mt-4 block text-sm font-bold text-slate-700">{messageDialog.inputLabel || "Choose an option"}<select autoFocus value={messageDialogInput} onChange={event => setMessageDialogInput(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 bg-white p-3 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100">{(messageDialog.options || []).map(option => <option key={option} value={option}>{option}</option>)}</select></label>}<div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => closeMessageWindow(messageDialog.mode === "info" ? true : null)} className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50">{messageDialog.mode === "info" ? "Close" : "Cancel"}</button>{messageDialog.mode !== "info" && <button type="button" disabled={Boolean(messageDialog.requireNonEmptyInput && !messageDialogInput.trim())} onClick={() => closeMessageWindow(messageDialog.mode === "input" || messageDialog.mode === "choice" ? messageDialogInput : true)} className={`rounded-xl px-4 py-2 text-sm font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-40 ${messageDialog.danger ? "bg-rose-600 hover:bg-rose-700" : "bg-indigo-600 hover:bg-indigo-700"}`}>{messageDialog.confirmLabel || (messageDialog.mode === "input" ? "Submit" : messageDialog.mode === "choice" ? "Continue" : "Confirm")}</button>}</div></section></div> : null;
+  const messageWindow = messageDialog ? <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-slate-950/50 p-4" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && messageDialog.mode === "info") closeMessageWindow(true); }}><section role="dialog" aria-modal="true" aria-labelledby="ilaw-message-window-title" className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl"><div className="flex items-start justify-between gap-3"><h2 id="ilaw-message-window-title" className="text-lg font-extrabold text-slate-900">{messageDialog.title}</h2><button type="button" aria-label="Close message" onClick={() => closeMessageWindow(null)} className="rounded-lg p-1 text-slate-500 hover:bg-slate-100"><X size={18}/></button></div><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{messageDialog.message}</p>{messageDialog.mode === "input" && <label className="mt-4 block text-sm font-bold text-slate-700">{messageDialog.inputLabel || "Details"}<textarea autoFocus required={Boolean(messageDialog.requireNonEmptyInput)} aria-required={Boolean(messageDialog.requireNonEmptyInput)} value={messageDialogInput} onChange={event => setMessageDialogInput(event.target.value)} rows={4} placeholder={messageDialog.requireNonEmptyInput ? "Explain why you are requesting this change..." : ""} className="mt-2 w-full rounded-xl border border-slate-300 p-3 text-sm font-normal outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100" />{messageDialog.requireNonEmptyInput && !messageDialogInput.trim() && <p className="mt-1 text-xs font-semibold text-rose-600">A reason is required before you can send this request.</p>}</label>}{(messageDialog.mode === "choice" || messageDialog.mode === "select") && <label className="mt-4 block text-sm font-bold text-slate-700">{messageDialog.inputLabel || "Choose an option"}<select autoFocus value={messageDialogInput} onChange={event => setMessageDialogInput(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 bg-white p-3 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100">{(messageDialog.options || []).map(option => <option key={option} value={option}>{option}</option>)}</select></label>}<div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => closeMessageWindow(messageDialog.mode === "info" ? true : null)} className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50">{messageDialog.mode === "info" ? "Close" : "Cancel"}</button>{messageDialog.mode !== "info" && <button type="button" disabled={Boolean(messageDialog.requireNonEmptyInput && !messageDialogInput.trim())} onClick={() => closeMessageWindow(messageDialog.mode === "input" || messageDialog.mode === "choice" || messageDialog.mode === "select" ? messageDialogInput : true)} className={`rounded-xl px-4 py-2 text-sm font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-40 ${messageDialog.danger ? "bg-rose-600 hover:bg-rose-700" : "bg-indigo-600 hover:bg-indigo-700"}`}>{messageDialog.confirmLabel || (messageDialog.mode === "input" ? "Submit" : (messageDialog.mode === "choice" || messageDialog.mode === "select") ? "Continue" : "Confirm")}</button>}</div></section></div> : null;
   const openPdfPreview = (existingPreviewWindow?: Window | null) => {
     const printContent = document.querySelector<HTMLElement>(".ilaw-deped-print");
     if (!printContent) {
@@ -627,12 +735,16 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
   // then the most recent local submission if the active draft is empty or unavailable.
   const [plan, setPlan] = useState<Plan>(() => blankPlan());
   const [savedPlans, setSavedPlans] = useState<Plan[]>([]);
+  const [incomingSharedPlans, setIncomingSharedPlans] = useState<any[]>([]);
   const [hasStartedPlan, setHasStartedPlan] = useState(false);
   const [selectedTerm, setSelectedTerm] = useState("");
   const [selectedWeek, setSelectedWeek] = useState("");
   const [selectedSubject, setSelectedSubject] = useState("");
   const [selectedGradeLevel, setSelectedGradeLevel] = useState("");
+  const [teacherSubmissionSectionFilter, setTeacherSubmissionSectionFilter] = useState("");
   const [showTermWeekModal, setShowTermWeekModal] = useState(false);
+  const [listSchoolYearFilter, setListSchoolYearFilter] = useState("current");
+  const [listSubjectFilter, setListSubjectFilter] = useState("all");
   const [listTermFilter, setListTermFilter] = useState("all");
   const [listWeekFilter, setListWeekFilter] = useState("all");
   const [showPlanList, setShowPlanList] = useState(true);
@@ -762,8 +874,12 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
   // the other sessions in the same weekly lesson plan.
   const currentTeacherSubmission = submissions.find(item =>
     item.teacherEmail === String(currentUser?.email || "").trim().toLowerCase() &&
+    String(item.plan.schoolId || "") === String(plan.schoolId || "") &&
+    getPlanSchoolYear(item.plan) === getPlanSchoolYear(plan) &&
+    getPlanGradeLevel(item.plan) === getPlanGradeLevel(plan) &&
     String(item.plan.term || "1") === String(plan.term || "1") &&
     String(item.plan.week || "1") === String(plan.week || "1") &&
+    String(item.plan.learningAreas || "").trim().toLowerCase() === String(plan.learningAreas || "").trim().toLowerCase() &&
     String(item.plan.lessonTitle || "").trim() === String(plan.lessonTitle || "").trim()
   );
   const activeSessionId = plan.sessions[currentSessionIndex]?.id;
@@ -784,8 +900,21 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
   const [signatureData, setSignatureData] = useState("");
   const [workflowMessage, setWorkflowMessage] = useState("");
   const [viewingSubmissionId, setViewingSubmissionId] = useState<string | null>(null);
+  // Preserve the exact page position when opening and closing the review modal.
+  const reviewModalScrollYRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!viewingSubmissionId && reviewModalScrollYRef.current !== null) {
+      const restoreY = reviewModalScrollYRef.current;
+      reviewModalScrollYRef.current = null;
+      window.requestAnimationFrame(() => window.scrollTo({ top: restoreY, behavior: "auto" }));
+    }
+  }, [viewingSubmissionId]);
   const [reviewSessionIndex, setReviewSessionIndex] = useState(0);
   const [cloudMessage, setCloudMessage] = useState("");
+  const [activeStorageTab, setActiveStorageTab] = useState<"local" | "cloud">("local");
+  const [storageStatus, setStorageStatus] = useState("");
+  const [cloudStoragePlans, setCloudStoragePlans] = useState<Plan[]>([]);
+  const [cloudStorageLoading, setCloudStorageLoading] = useState(false);
   const [lessonMaterials, setLessonMaterials] = useState<StoredLessonMaterial[]>([]);
   const [materialsLoading, setMaterialsLoading] = useState(false);
   const [materialsMessage, setMaterialsMessage] = useState("");
@@ -1036,7 +1165,11 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
   const blankPlanForCurrentUser = () => ({
     ...blankPlan(),
     teacherNames: userDisplayName,
-    schoolHeadName: String(plan.schoolHeadName || "").trim()
+    schoolHeadName: String(plan.schoolHeadName || "").trim(),
+    schoolId: schoolId || "",
+    schoolName: schoolDisplayName || String(currentUser?.schoolName || currentUser?.school?.schoolName || ""),
+    schoolYear: String(currentSchoolYear || currentUser?.currentSchoolYear || currentUser?.schoolYear || currentUser?.currentSY || getSchoolYearLabel(new Date())),
+    gradeLevel: selectedGradeLevel || "",
   });
 
   const schoolId = String(
@@ -1432,13 +1565,35 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
       const latest = new Map<string, { plan: Plan; updatedAt: string }>();
       snapshot.docs.forEach(record => {
         const data = record.data() as any;
-        const storedPlan = normalizeStoredPlan(data.plan || data);
+        let storedPlan = normalizeStoredPlan(data.plan || data);
+        // One-time compatibility migration: older ILAW records did not store a school ID.
+        // Associate those legacy records with the user's currently assigned school so
+        // existing work remains available; future school changes stay isolated by school ID.
+        if (!String(storedPlan.schoolId || "").trim() && String(schoolId || "").trim()) {
+          storedPlan = normalizeStoredPlan({
+            ...storedPlan,
+            schoolId,
+            schoolName: schoolDisplayName || String(currentUser?.schoolName || currentUser?.school?.schoolName || ""),
+            schoolYear: getPlanSchoolYear(storedPlan) || String(currentSchoolYear || currentUser?.currentSchoolYear || currentUser?.schoolYear || currentUser?.currentSY || getSchoolYearLabel(new Date())),
+            gradeLevel: getPlanGradeLevel(storedPlan),
+          });
+          void setDoc(doc(db, PLAN_RECORDS_COLLECTION, record.id), {
+            ...data,
+            ownerUid: uid,
+            schoolId,
+            schoolYear: getPlanSchoolYear(storedPlan),
+            gradeLevel: getPlanGradeLevel(storedPlan),
+            plan: storedPlan,
+            migratedSchoolScopeAt: new Date().toISOString(),
+          }, { merge: true }).catch(error => console.warn("Could not migrate legacy ILAW school scope:", error));
+        }
         const identity = planListIdentity(storedPlan);
         const current = latest.get(identity);
         const updatedAt = String(data.updatedAt || "");
         if (!current || updatedAt >= current.updatedAt) latest.set(identity, { plan: storedPlan, updatedAt });
       });
       const plans = Array.from(latest.values()).map(item => item.plan)
+        .filter(item => String(item.schoolId || "") === String(schoolId || ""))
         .sort((a, b) => Number(a.term || 1) - Number(b.term || 1) || Number(a.week || 1) - Number(b.week || 1));
       setSavedPlans(plans);
       setCloudMessage(`Live Firestore sync active — ${plans.length} lesson plan${plans.length === 1 ? "" : "s"} loaded.`);
@@ -1447,12 +1602,12 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
       if (!cancelled) setCloudMessage("Could not sync lesson plans from Firestore. Check your connection and Firestore permissions.");
     });
     return () => { cancelled = true; unsubscribe(); };
-  }, [currentUser?.uid, currentUser?.id, currentUser?.userId, currentUser?.user_id, currentUser?.profile?.uid, currentUser?.profile?.id]);
+  }, [currentUser?.uid, currentUser?.id, currentUser?.userId, currentUser?.user_id, currentUser?.profile?.uid, currentUser?.profile?.id, schoolId]);
 
   const planRecordId = (item: Plan, uid: string) => {
-    // One canonical Firestore document per teacher + term + week + learning area.
+    // Keep each school, school year, grade level, term, week, and learning area isolated.
     const safeKey = (value: unknown) => encodeURIComponent(String(value || "").trim().toLowerCase()).replace(/%/g, "_");
-    return `${uid}_term_${safeKey(item.term || "1")}_week_${safeKey(item.week || "1")}_subject_${safeKey(item.learningAreas)}`;
+    return `${uid}_school_${safeKey(item.schoolId)}_sy_${safeKey(getPlanSchoolYear(item))}_grade_${safeKey(getPlanGradeLevel(item))}_term_${safeKey(item.term || "1")}_week_${safeKey(item.week || "1")}_subject_${safeKey(item.learningAreas)}`;
   };
 
   const exportPlansToJson = () => {
@@ -1486,7 +1641,16 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
       const parsed = JSON.parse(await file.text());
       const rawPlans = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.plans) ? parsed.plans : parsed?.plan ? [parsed.plan] : (parsed && typeof parsed === "object" && ("sessions" in parsed || "lessonTitle" in parsed) ? [parsed] : []);
       if (!rawPlans.length) throw new Error("No lesson plans found in the JSON file.");
-      const imported = rawPlans.map((item: any) => normalizeStoredPlan(item?.plan || item));
+      const imported = rawPlans.map((item: any) => normalizeStoredPlan({
+        ...(item?.plan || item),
+        schoolId,
+        schoolName: schoolDisplayName || String(currentUser?.schoolName || currentUser?.school?.schoolName || ""),
+        schoolYear: activeSchoolYear,
+        gradeLevel: selectedGradeLevel || getPlanGradeLevel(item?.plan || item),
+        gradeSection: "",
+        teacherNames: userDisplayName || String((item?.plan || item)?.teacherNames || ""),
+        schoolHeadName: resolvedSchoolHeadName || "",
+      }));
       for (const item of imported) {
         const recordId = planRecordId(item, uid);
         await setDoc(doc(db, PLAN_RECORDS_COLLECTION, recordId), {
@@ -1503,6 +1667,7 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
       }
       const records = await getDocs(query(collection(db, PLAN_RECORDS_COLLECTION), where("ownerUid", "==", uid)));
       const allPlans = records.docs.map(record => { const data = record.data() as any; return normalizeStoredPlan(data.plan || data); })
+        .filter(item => String(item.schoolId || "") === String(schoolId || ""))
         .sort((a, b) => Number(a.term || 1) - Number(b.term || 1) || Number(a.week || 1) - Number(b.week || 1));
       setSavedPlans(allPlans);
       if (imported.length === 1) {
@@ -1541,7 +1706,23 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
       try {
         const snapshot = await getDocs(collection(db, SUBMISSIONS_CLOUD_COLLECTION));
         if (cancelled) return;
-        const cloudItems = snapshot.docs.map(entry => ({ ...(entry.data() as Submission), id: entry.id }));
+        const cloudItems = snapshot.docs.map(entry => {
+          const raw = { ...(entry.data() as Submission), id: entry.id };
+          if (!String(raw.plan?.schoolId || "").trim() && String(schoolId || "").trim()) {
+            const migratedPlan = normalizeStoredPlan({
+              ...raw.plan,
+              schoolId,
+              schoolName: schoolDisplayName || String(currentUser?.schoolName || currentUser?.school?.schoolName || ""),
+              schoolYear: getPlanSchoolYear(raw.plan) || String(currentSchoolYear || currentUser?.currentSchoolYear || currentUser?.schoolYear || currentUser?.currentSY || getSchoolYearLabel(new Date())),
+              gradeLevel: getPlanGradeLevel(raw.plan),
+            });
+            const migrated = { ...raw, schoolId, schoolYear: getPlanSchoolYear(migratedPlan), gradeLevel: getPlanGradeLevel(migratedPlan), plan: migratedPlan };
+            void setDoc(doc(db, SUBMISSIONS_CLOUD_COLLECTION, entry.id), migrated, { merge: true })
+              .catch(error => console.warn("Could not migrate legacy ILAW submission school scope:", error));
+            return migrated;
+          }
+          return raw;
+        });
         if (!cloudItems.length) return;
         setSubmissions(previous => {
           const merged = new Map<string, Submission>();
@@ -1559,7 +1740,7 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     };
     void loadCloudSubmissions();
     return () => { cancelled = true; };
-  }, []);
+  }, [schoolId, currentUser?.uid, currentUser?.id, currentSchoolYear]);
 
   const persistChangeRequests = (next: ApprovedPlanChangeRequest[]) => {
     setChangeRequests(next);
@@ -1590,6 +1771,347 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     void loadChangeRequests();
     return () => { cancelled = true; };
   }, []);
+
+  // Shared sessions are delivered individually to the recipient's ILAW inbox.
+  // The recipient accepts each session before it is merged into their own weekly plan.
+  useEffect(() => {
+    const uid = String(currentUser?.uid || currentUser?.id || currentUser?.userId || currentUser?.user_id || currentUser?.profile?.uid || currentUser?.profile?.id || "").trim();
+    if (!uid) {
+      setIncomingSharedPlans([]);
+      return;
+    }
+    const sharedQuery = query(collection(db, "ilawLessonPlanShares"), where("recipientUid", "==", uid));
+    const unsubscribe = onSnapshot(sharedQuery, snapshot => {
+      const items = snapshot.docs.map(entry => ({ ...(entry.data() as any), id: entry.id }))
+        // Accepted shares are no longer invitations; the accepted plan now lives
+        // in the recipient's own PLAN_RECORDS_COLLECTION records.
+        .filter(item => item.plan &&
+          String(item.schoolId || item.plan.schoolId || "") === String(schoolId || "") &&
+          !["accepted", "declined"].includes(String(item.status || "").toLowerCase()));
+      setIncomingSharedPlans(items.sort((a, b) => String(b.sharedAt || "").localeCompare(String(a.sharedAt || ""))));
+    }, error => {
+      console.warn("Could not load ILAW lesson-plan shares:", error);
+    });
+    return () => unsubscribe();
+  }, [currentUser?.uid, currentUser?.id, currentUser?.userId, currentUser?.user_id, currentUser?.profile?.uid, currentUser?.profile?.id, schoolId]);
+
+  const shareLessonPlanAsNew = async (sourcePlan: Plan) => {
+    const normalizeSchool = (value: any) => String(value ?? "").trim().replace(/\s+/g, "");
+    const senderUid = String(currentUser?.uid || currentUser?.id || currentUser?.userId || currentUser?.user_id || currentUser?.profile?.uid || currentUser?.profile?.id || "").trim();
+    const sourceSessions = Array.isArray(sourcePlan.sessions) ? sourcePlan.sessions : [];
+    if (!sourceSessions.length) {
+      await showMessageWindow({ title: "No Sessions Available", message: "This lesson plan has no sessions to share.", mode: "info" });
+      return;
+    }
+    const sessionOptions = sourceSessions.map((session: any, index: number) => {
+      const title = String(session.lessonSubtitleTitle || session.title || "").trim();
+      return `Session ${index + 1}${title ? ` — ${title}` : ""}`;
+    });
+    const selectedSessionChoice = await showMessageWindow({
+      title: "Select Session to Share",
+      message: "Choose only one session to share. Other sessions in this lesson plan will not be included.",
+      mode: "select",
+      inputLabel: "Session",
+      options: sessionOptions,
+      initialValue: sessionOptions[0],
+      confirmLabel: "Continue",
+    });
+    if (typeof selectedSessionChoice !== "string") return;
+    const selectedSessionIndex = sessionOptions.indexOf(selectedSessionChoice);
+    if (selectedSessionIndex < 0) return;
+    const selectedSourceSession: any = sourceSessions[selectedSessionIndex];
+    const sourceSessionId = String(selectedSourceSession.id || `session-${selectedSessionIndex + 1}`);
+    // Keep the originating teacher's Term and Week as immutable sharing metadata.
+    const sourceTerm = String(sourcePlan.term || "1");
+    const sourceWeek = String(sourcePlan.week || "1");
+    const sessionOnlyPlan = normalizeStoredPlan({
+      ...sourcePlan,
+      term: sourceTerm,
+      week: sourceWeek,
+      noOfSessions: "1",
+      sessions: [{ ...selectedSourceSession, id: "session-1" }],
+      savedSessionIds: ["session-1"],
+    });
+    let eligibleUsers: any[] = [];
+    try {
+      const usersSnapshot = await getDocs(collection(db, "users"));
+      eligibleUsers = usersSnapshot.docs.map(entry => ({ id: entry.id, ...entry.data() }))
+        .filter((record: any) => {
+          const recordEmail = String(record.email || record.emailAddress || record.userEmail || record.googleEmail || record.mail || "").trim().toLowerCase();
+          const recordSchool = record.schoolId ?? record.school_id ?? record.schoolID ?? record.schoolIDNumber ?? record.assignedSchoolId ?? record.assignedSchoolID;
+          const recordUid = String(record.uid || record.userId || record.user_id || record.authUid || record.id || "").trim();
+          const roleValues = [
+            record.role, record.userRole, record.user_role, record.accountType, record.account_type,
+            record.userType, record.user_type, record.accountRole, record.account_role,
+            record.position, record.designation, record.type,
+            record.profile?.role, record.profile?.userRole, record.profile?.accountType,
+            record.profile?.userType, record.permissions?.role,
+          ].filter(Boolean).map((value: any) => String(value).toLowerCase().replace(/[\s_-]+/g, ""));
+          const isSystemAdminAccount = record.isSystemAdmin === true || record.isAdmin === true ||
+            record.is_system_admin === true || record.profile?.isSystemAdmin === true ||
+            roleValues.some((role: string) => /^(systemadmin|admin|administrator|superadmin)$/.test(role));
+          const isSchoolHeadAccount = record.isSchoolHead === true || record.isPrincipal === true ||
+            record.is_school_head === true || record.is_principal === true ||
+            record.profile?.isSchoolHead === true || record.profile?.isPrincipal === true ||
+            roleValues.some((role: string) => /^(schoolhead|principal|schooladministrator|assistantprincipal|viceprincipal)$/.test(role));
+          const isStudentOrLearnerAccount = record.isStudent === true || record.isLearner === true ||
+            record.is_student === true || record.is_learner === true ||
+            record.profile?.isStudent === true || record.profile?.isLearner === true ||
+            roleValues.some((role: string) => /^(student|learner|pupil|studentaccount|learneraccount|pupilaccount)$/.test(role));
+          return recordEmail && recordUid && recordUid !== senderUid &&
+            normalizeSchool(recordSchool) === normalizeSchool(schoolId) &&
+            !isSystemAdminAccount && !isSchoolHeadAccount && !isStudentOrLearnerAccount;
+        })
+        .map((record: any) => {
+          const email = String(record.email || record.emailAddress || record.userEmail || record.googleEmail || record.mail || "").trim().toLowerCase();
+          const name = String(record.displayName || record.fullName || record.full_name || record.name ||
+            [record.firstName || record.first_name, record.lastName || record.last_name].filter(Boolean).join(" ") || email);
+          return { ...record, email, displayNameForShare: name, uidForShare: String(record.uid || record.userId || record.user_id || record.authUid || record.id || "").trim() };
+        })
+        .sort((a: any, b: any) => a.displayNameForShare.localeCompare(b.displayNameForShare));
+    } catch (error) {
+      console.error("Could not load ILAW share recipients:", error);
+      await showMessageWindow({ title: "Unable to Load Users", message: "The registered users could not be loaded. Please check the Firestore users collection permissions and try again.", mode: "info" });
+      return;
+    }
+    if (!eligibleUsers.length) {
+      await showMessageWindow({ title: "No Eligible Users", message: "No other registered users were found in your school. Only eligible teacher/staff accounts with a registered email address and matching school ID can receive a shared copy. System Admin, School Head, and Student/Learner accounts are excluded.", mode: "info" });
+      return;
+    }
+    const recipientOptions = eligibleUsers.map((record: any) => `${record.displayNameForShare} (${record.email})`);
+    const recipientChoice = await showMessageWindow({
+      title: "Share Selected Session",
+      message: `You selected Session ${selectedSessionIndex + 1}. Select an eligible teacher/staff account from your school. Only this session will be sent; the recipient must accept it before it is added to My Lesson Plan Submissions. Your original lesson plan will not be changed.`,
+      mode: "select",
+      inputLabel: "Select recipient",
+      options: recipientOptions,
+      initialValue: recipientOptions[0],
+      confirmLabel: "Share",
+    });
+    if (typeof recipientChoice !== "string") return;
+    const recipient = eligibleUsers.find((record: any) => `${record.displayNameForShare} (${record.email})` === recipientChoice);
+    if (!recipient) return;
+    const recipientEmail = recipient.email;
+    const recipientUid = String(recipient.uid || recipient.userId || recipient.user_id || recipient.authUid || recipient.id || "").trim();
+    if (!recipientUid) {
+      await showMessageWindow({ title: "Cannot Share", message: "The recipient's Firestore user record does not contain a usable account UID.", mode: "info" });
+      return;
+    }
+    if (!senderUid || recipientUid === senderUid) {
+      await showMessageWindow({ title: "Cannot Share", message: "Please choose another registered teacher in your school.", mode: "info" });
+      return;
+    }
+    const recipientName = String(recipient.displayName || recipient.fullName || recipient.full_name || recipient.name ||
+      [recipient.firstName || recipient.first_name, recipient.lastName || recipient.last_name].filter(Boolean).join(" ") || recipientEmail);
+
+    // Prevent the same sender from sharing the same weekly lesson plan with
+    // the same recipient more than once. Check existing records as well as
+    // the sourcePlanKey added to new share records (including older records
+    // that predate this key).
+    const makeSharePlanKey = (plan: any, sessionId: string) => [
+      plan?.schoolId || schoolId || "",
+      plan?.schoolYear || plan?.school_year || activeSchoolYear || "",
+      plan?.gradeLevel || plan?.grade_level || "",
+      plan?.term || "1",
+      plan?.week || "1",
+      plan?.learningAreas || plan?.learningArea || "",
+      sessionId,
+    ].map(value => String(value).trim().toLowerCase().replace(/\s+/g, " ")).join("::");
+    const sourcePlanKey = makeSharePlanKey(sourcePlan, sourceSessionId);
+    try {
+      const priorSharesQuery = query(collection(db, "ilawLessonPlanShares"), where("senderUid", "==", senderUid));
+      const priorSharesSnapshot = await getDocs(priorSharesQuery);
+      const alreadyShared = priorSharesSnapshot.docs.some(entry => {
+        const previousShare: any = entry.data();
+        if (String(previousShare.recipientUid || "") !== recipientUid) return false;
+        const previousSessionIds = Array.isArray(previousShare.plan?.sessions)
+          ? previousShare.plan.sessions.map((session: any) => String(session.id || ""))
+          : [];
+        const samePlanAndSession = makeSharePlanKey(previousShare.plan, sourceSessionId) === sourcePlanKey && (
+          String(previousShare.sourceSessionId || "") === sourceSessionId ||
+          (!previousShare.sourceSessionId && previousSessionIds.includes(sourceSessionId))
+        );
+        return samePlanAndSession || String(previousShare.sourcePlanKey || "") === sourcePlanKey;
+      });
+      if (alreadyShared) {
+        await showMessageWindow({
+          title: "Already Shared",
+          message: `Session ${selectedSessionIndex + 1} from this ILAW Lesson Plan has already been shared with ${recipientName} (${recipientEmail}). No duplicate invitation was sent.`,
+          mode: "info",
+        });
+        return;
+      }
+    } catch (error) {
+      console.error("Could not verify previous ILAW shares:", error);
+      await showMessageWindow({
+        title: "Unable to Verify Sharing",
+        message: "The system could not check whether this lesson plan was already shared. To prevent duplicate copies, sharing was stopped. Please try again.",
+        mode: "info",
+      });
+      return;
+    }
+
+    const shareId = `ilaw-share-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const independentCopy = normalizeStoredPlan(JSON.parse(JSON.stringify({
+      ...sessionOnlyPlan,
+      teacherNames: recipientName,
+      schoolId,
+      schoolName: schoolDisplayName || sourcePlan.schoolName || "",
+      schoolYear: getPlanSchoolYear(sourcePlan) || activeSchoolYear,
+      gradeLevel: getPlanGradeLevel(sourcePlan),
+    })));
+    try {
+      await setDoc(doc(db, "ilawLessonPlanShares", shareId), {
+        id: shareId,
+        recipientUid,
+        recipientEmail,
+        recipientName,
+        sourcePlanKey,
+        sourceSessionId,
+        sourceTerm,
+        sourceWeek,
+        sourceSessionNumber: selectedSessionIndex + 1,
+        sourceSessionTitle: String(selectedSourceSession.lessonSubtitleTitle || selectedSourceSession.title || `Session ${selectedSessionIndex + 1}`),
+        senderUid,
+        senderEmail: String(currentUser?.email || currentUser?.profile?.email || "").trim().toLowerCase(),
+        senderName: userDisplayName,
+        schoolId,
+        schoolYear: getPlanSchoolYear(independentCopy),
+        plan: independentCopy,
+        sharedAt: new Date().toISOString(),
+        status: "pending",
+      });
+      setWorkflowMessage(`A sharing invitation for Session ${selectedSessionIndex + 1} was sent to ${recipientName} (${recipientEmail}). Only the selected session was shared.`);
+      await showMessageWindow({
+        title: "Sharing Invitation Sent",
+        message: `A sharing invitation for Session ${selectedSessionIndex + 1} was sent to ${recipientName} (${recipientEmail}). Only this session was shared. It will be added to their My Lesson Plan Submissions only after they click Accept. Your original lesson plan remains unchanged.`,
+        mode: "info",
+      });
+    } catch (error) {
+      console.error("Could not share ILAW lesson plan:", error);
+      const detail = error instanceof Error ? error.message : "Unknown Firestore error.";
+      await showMessageWindow({
+        title: "Share Failed",
+        message: `The copy could not be shared. Check Firestore permissions for the ilawLessonPlanShares collection. Details: ${detail}`,
+        mode: "info",
+      });
+    }
+  };
+
+  const acceptSharedLessonPlan = async (sharedItem: any) => {
+    const recipientUid = String(currentUser?.uid || currentUser?.id || currentUser?.userId || currentUser?.user_id || currentUser?.profile?.uid || currentUser?.profile?.id || "").trim();
+    if (!recipientUid) {
+      await showMessageWindow({ title: "Sign In Required", message: "Please sign in before accepting a shared lesson plan.", mode: "info" });
+      return;
+    }
+    if (String(sharedItem.status || "").toLowerCase() === "accepted") {
+      await showMessageWindow({ title: "Already Accepted", message: "This shared lesson plan has already been added to your My Lesson Plan Submissions.", mode: "info" });
+      return;
+    }
+    if (String(sharedItem.recipientUid || "") !== recipientUid) {
+      await showMessageWindow({ title: "Not Authorized", message: "This sharing invitation belongs to another user account.", mode: "info" });
+      return;
+    }
+
+    const sharedSession: any = Array.isArray(sharedItem.plan?.sessions) ? sharedItem.plan.sessions[0] : null;
+    if (!sharedSession) {
+      await showMessageWindow({ title: "Invalid Shared Session", message: "This invitation does not contain a session to accept.", mode: "info" });
+      return;
+    }
+    // The sender's Term and Week are authoritative. Do not use the recipient's
+    // current Term/Week selection when creating or merging the accepted session.
+    const sourceTerm = String(sharedItem.sourceTerm ?? sharedItem.plan?.term ?? "1");
+    const sourceWeek = String(sharedItem.sourceWeek ?? sharedItem.plan?.week ?? "1");
+    const sharedPlanBase = normalizeStoredPlan({
+      ...sharedItem.plan,
+      term: sourceTerm,
+      week: sourceWeek,
+      teacherNames: userDisplayName || String(currentUser?.email || currentUser?.profile?.email || ""),
+      schoolId,
+      schoolName: schoolDisplayName || sharedItem.plan?.schoolName || "",
+      schoolYear: getPlanSchoolYear(sharedItem.plan) || activeSchoolYear,
+      gradeLevel: getPlanGradeLevel(sharedItem.plan),
+    });
+    const existingOwnedPlan = savedPlans.find(item => planListIdentity(item) === planListIdentity(sharedPlanBase));
+    const alreadyAdded = existingOwnedPlan?.sessions?.some((session: any) => String(session.sharedFromShareId || "") === String(sharedItem.id));
+    if (alreadyAdded) {
+      await showMessageWindow({ title: "Session Already Added", message: "This shared session is already included in your My Lesson Plan Submissions.", mode: "info" });
+      return;
+    }
+    const basePlan = existingOwnedPlan || sharedPlanBase;
+    const nextSessionNumber = (basePlan.sessions || []).length + 1;
+    const acceptedSession = {
+      ...sharedSession,
+      id: `session-${nextSessionNumber}`,
+      sharedFromShareId: sharedItem.id,
+      sharedFromSessionId: String(sharedItem.sourceSessionId || sharedSession.id || ""),
+    } as any;
+    const acceptedPlan = normalizeStoredPlan({
+      ...basePlan,
+      // Preserve the originating teacher's Term and Week even when merging
+      // this session into one of the recipient's existing lesson plans.
+      term: sourceTerm,
+      week: sourceWeek,
+      teacherNames: userDisplayName || String(currentUser?.email || currentUser?.profile?.email || ""),
+      schoolId,
+      schoolName: schoolDisplayName || basePlan.schoolName || "",
+      schoolYear: getPlanSchoolYear(basePlan) || activeSchoolYear,
+      gradeLevel: getPlanGradeLevel(basePlan),
+      sessions: [...(basePlan.sessions || []), acceptedSession],
+      noOfSessions: String((basePlan.sessions || []).length + 1),
+      savedSessionIds: Array.from(new Set([...(basePlan.savedSessionIds || []), acceptedSession.id])),
+    });
+    const recordId = planRecordId(acceptedPlan, recipientUid);
+    const now = new Date().toISOString();
+    try {
+      // Use the recipient's normal owned-plan record. This is the only point at
+      // which the shared plan enters My Lesson Plan Submissions.
+      await setDoc(doc(db, PLAN_RECORDS_COLLECTION, recordId), {
+        ownerUid: recipientUid,
+        ownerEmail: String(currentUser?.email || currentUser?.profile?.email || sharedItem.recipientEmail || "").trim().toLowerCase(),
+        schoolId,
+        schoolYear: getPlanSchoolYear(acceptedPlan),
+        gradeLevel: getPlanGradeLevel(acceptedPlan),
+        plan: acceptedPlan,
+        term: String(acceptedPlan.term || "1"),
+        week: String(acceptedPlan.week || "1"),
+        lessonTitle: getLessonProperTitle(acceptedPlan),
+        updatedAt: now,
+        createdAt: now,
+        createdFromShareId: sharedItem.id,
+        sharedByUid: String(sharedItem.senderUid || ""),
+        sharedByName: String(sharedItem.senderName || sharedItem.senderEmail || ""),
+      }, { merge: true });
+
+      // Mark the invitation accepted only after the recipient's owned copy is saved.
+      await setDoc(doc(db, "ilawLessonPlanShares", sharedItem.id), {
+        status: "accepted",
+        acceptedAt: now,
+        acceptedByUid: recipientUid,
+        acceptedPlanRecordId: recordId,
+      }, { merge: true });
+
+      setSavedPlans(previous => {
+        const identity = planListIdentity(acceptedPlan);
+        const withoutDuplicate = previous.filter(item => planListIdentity(item) !== identity);
+        return [...withoutDuplicate, acceptedPlan];
+      });
+      setIncomingSharedPlans(previous => previous.filter(item => item.id !== sharedItem.id));
+      await showMessageWindow({
+        title: "Lesson Plan Accepted",
+        message: `Session ${sharedItem.sourceSessionNumber || ""} shared by ${sharedItem.senderName || sharedItem.senderEmail || "another teacher"} has been added to your My Lesson Plan Submissions. It has been added as one session without replacing your existing sessions.`,
+        mode: "info",
+      });
+    } catch (error) {
+      console.error("Could not accept shared ILAW lesson plan:", error);
+      const detail = error instanceof Error ? error.message : "Unknown Firestore error.";
+      await showMessageWindow({
+        title: "Acceptance Failed",
+        message: `The lesson plan could not be added to your My Lesson Plan Submissions. Please check Firestore permissions for ${PLAN_RECORDS_COLLECTION} and ilawLessonPlanShares. Details: ${detail}`,
+        mode: "info",
+      });
+    }
+  };
 
   const requestApprovedPlanChange = async (item: Submission, type: "edit" | "delete") => {
     if (item.status !== "approved") return;
@@ -1639,7 +2161,7 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
       setWorkflowMessage("The original lesson plan could not be found. This request cannot be approved.");
       return;
     }
-    const note = await showMessageWindow({ title: `${decision === "approved" ? "Approve" : "Reject"} ${request.type === "edit" ? "Edit" : "Delete"} Request`, message: `Lesson plan: “${request.planTitle}”. ${decision === "rejected" ? "A reviewer note explaining the rejection is required." : "Enter a reviewer note for the teacher."}`, mode: "input", inputLabel: decision === "rejected" ? "Reviewer note / reason for rejection (required)" : "Reviewer note (optional)", confirmLabel: decision === "approved" ? "Approve request" : "Reject request", danger: decision === "rejected", requireNonEmptyInput: decision === "rejected" });
+    const note = await showMessageWindow({ title: `${decision === "approved" ? "Approve" : "Reject"} ${request.type === "edit" ? "Edit" : "Delete"} Request`, message: `Lesson plan: “${request.planTitle}”. ${decision === "rejected" ? "A reviewer note explaining the rejection is required." : "Enter a reviewer note for the teacher."}`, mode: "input", inputLabel: decision === "rejected" ? "Reviewer note / reason for rejection (required)" : "Reviewer note", confirmLabel: decision === "approved" ? "Approve request" : "Reject request", danger: decision === "rejected", requireNonEmptyInput: decision === "rejected" });
     if (typeof note !== "string") return;
     const reviewerName = String(currentUser?.displayName || currentUser?.name || currentUser?.email || "System Admin");
     const reviewed = changeRequests.map(item => item.id === request.id ? { ...item, status: decision, reviewedAt: new Date().toISOString(), reviewerName, reviewerNote: note.trim() } : item);
@@ -1687,29 +2209,6 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
       setWorkflowMessage("Please enter a Lesson Title in LESSON PROPER and complete Learning Area/s. The teacher name is taken from your signed-in account.");
       return;
     }
-    // Reflection is excluded from the required checklist.
-    const requiredPlanParts: Array<[string, unknown]> = [
-      ["Learning Competency and Curriculum Standards", plan.competencyStandards],
-      ["Learning Resources", plan.learningResources],
-      ["Opportunities for Integration", plan.integration],
-      ["References", plan.references],
-    ];
-    const missingPlanParts = requiredPlanParts.filter(([, value]) => !String(value ?? "").trim()).map(([label]) => label);
-    const missingSessionParts: string[] = [];
-    (plan.sessions || []).forEach((session, index) => {
-      const sessionParts: Array<[string, unknown]> = [
-        [`Session ${index + 1}: Learning Objectives`, session.objectives],
-        [`Session ${index + 1}: Learning Experience / Lesson Proper`, flowDraftsRef.current[session.id] !== undefined ? flowDraftsRef.current[session.id] : session.flow],
-        [`Session ${index + 1}: Assessment`, session.assessment || session.examination || session.summative],
-        [`Session ${index + 1}: Ways Forward`, session.waysForward],
-      ];
-      sessionParts.forEach(([label, value]) => { if (!String(value ?? "").replace(/<[^>]*>/g, " ").trim()) missingSessionParts.push(label); });
-    });
-    if (missingPlanParts.length || missingSessionParts.length) {
-      const missing = [...missingPlanParts, ...missingSessionParts];
-      setWorkflowMessage(`Complete all ILAW parts before submitting for approval. Reflection is not required yet. Missing: ${missing.join("; ")}`);
-      return;
-    }
     const planWithLiveEditors: Plan = {
       ...plan,
       objectivesApplyTargetsBySession: JSON.parse(JSON.stringify(objectivesApplyTargetsBySession)),
@@ -1730,8 +2229,7 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
         };
       }),
     };
-    const planSnapshot = normalizeStoredPlan(JSON.parse(JSON.stringify(planWithLiveEditors)));
-    const savingSubject = String(planSnapshot.learningAreas || planWithLiveEditors.learningAreas || "Unspecified subject").trim() || "Unspecified subject";
+    const planSnapshot = normalizeStoredPlan(JSON.parse(JSON.stringify({ ...planWithLiveEditors, schoolYear: activeSchoolYear, schoolId, schoolName: schoolDisplayName || String(currentUser?.schoolName || currentUser?.school?.schoolName || ""), gradeLevel: selectedGradeLevel || getPlanGradeLevel(planWithLiveEditors) })));
     const uid = String(currentUser?.uid || currentUser?.id || currentUser?.userId || currentUser?.user_id || currentUser?.profile?.uid || currentUser?.profile?.id || "").trim();
     if (uid) {
       try {
@@ -1739,6 +2237,9 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
         void setDoc(doc(db, PLAN_RECORDS_COLLECTION, recordId), {
           ownerUid: uid,
           ownerEmail: email,
+          schoolId: planSnapshot.schoolId || schoolId,
+          schoolYear: getPlanSchoolYear(planSnapshot),
+          gradeLevel: getPlanGradeLevel(planSnapshot),
           plan: planSnapshot,
           term: String(planSnapshot.term || "1"),
           week: String(planSnapshot.week || "1"),
@@ -1756,7 +2257,7 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     if (existing) {
       // Approval belongs to each session, not to the whole submission. Keep approvals
       // for sessions whose content has not changed; only changed/new sessions need review.
-      const previousSessions = new Map<string, Session>((existing.plan.sessions || []).map(session => [session.id, session] as const));
+      const previousSessions = new Map<string, Session>((existing.plan.sessions || []).map(session => [session.id, session]));
       const nextSessions = planSnapshot.sessions || [];
       const sameSessionContent = (before: Session | undefined, after: Session) => {
         if (!before) return false;
@@ -1804,7 +2305,7 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
       });
       nextApproved.forEach(sessionId => { nextSessionStatuses[sessionId] = "approved"; });
       const nextReviewNotes = Object.fromEntries(
-        Object.entries(existing.sessionReviewNotes || {}).filter(([sessionId]) => nextSessions.some(session => session.id === sessionId) && sameSessionContent(previousSessions.get(sessionId), nextSessions.find(session => session.id === sessionId)!))
+        Object.entries((existing.sessionReviewNotes || {}) as Record<string, string>).filter(([sessionId]) => nextSessions.some(session => session.id === sessionId) && sameSessionContent(previousSessions.get(sessionId), nextSessions.find(session => session.id === sessionId)!))
       );
       const allSessionsApproved = nextSessions.length > 0 && nextSessions.every(session => nextApproved.includes(session.id));
       const updated: Submission = {
@@ -1832,6 +2333,9 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
       plan: JSON.parse(JSON.stringify(planSnapshot)),
       teacherName: String(currentUser?.displayName || currentUser?.name || plan.teacherNames),
       teacherEmail: email,
+      schoolId: planSnapshot.schoolId || schoolId,
+      schoolYear: getPlanSchoolYear(planSnapshot),
+      gradeLevel: getPlanGradeLevel(planSnapshot),
       submittedAt: new Date().toISOString(),
       status: "pending",
       submittedSessionIds: [targetSessionId],
@@ -2077,9 +2581,9 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     String(plan.aiDeclaration || "").trim()
   );
   const currentPlanIsSaved = Boolean(savedPlanSignature && savedPlanSignature === JSON.stringify(plan));
-  // Approval is available once Lesson Information is complete, there is at least
-  // one session, and the exact current version has been saved. Reflection is optional.
-  const lessonPlanComplete = Boolean(lessonInformationComplete && plan.sessions.length > 0);
+  // Approval requires Lesson Information plus every required field in all four
+  // ILAW parts for every session. Reflection is optional and is not checked here.
+  const lessonPlanComplete = Boolean(lessonInformationComplete && isILAWPartsComplete(plan));
   const canProceedToApproval = lessonPlanComplete && currentPlanIsSaved;
 
   const update = <K extends keyof Plan>(key: K, value: Plan[K]) =>
@@ -2106,15 +2610,12 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     sessions: prev.sessions.map((_, index) => makeSession(`session-${index + 1}`))
   }));
 
-  // Keep every session tab accessible so the teacher can navigate directly to the last session
-  // and complete its Reflection without being blocked by earlier sessions.
+  // Session navigation is independent of optional fields such as Reflection,
+  // Assessment Attachments, carry-over selection, title settings, sequence selection,
+  // and the apply-to-selected-sessions checkboxes.
   const canOpenSessionTab = (_index: number) => true;
   const goToNextSessionTab = () => {
     if (currentSessionIndex >= 0 && currentSessionIndex < plan.sessions.length - 1) {
-      if (!plan.sessions[currentSessionIndex]?.reflection?.trim()) {
-        setWorkflowMessage(`Complete the Reflection for Session ${currentSessionIndex + 1} before proceeding.`);
-        return;
-      }
       setWorkflowMessage("");
       const nextSession = plan.sessions[currentSessionIndex + 1];
       if (nextSession) setActiveSessionTab(nextSession.id);
@@ -2158,7 +2659,7 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     }
   };
 
-  const savePlan = async (planToSave: Plan = plan) => {
+  const savePlan = async (planToSave: Plan = plan, showSuccessDialog = true) => {
     const savingSessionIndex = Math.max(0, (planToSave.sessions || []).findIndex(session => session.id === activeSessionTab));
     const savingSessionNumber = savingSessionIndex + 1;
     // Saving is available from every session, including sessions that have already
@@ -2187,8 +2688,8 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
         };
       }),
     };
-    const planSnapshot = normalizeStoredPlan(JSON.parse(JSON.stringify(planWithLiveEditors)));
-    const savingSubject = String(planSnapshot.learningAreas || planToSave.learningAreas || "Unspecified subject").trim() || "Unspecified subject";
+    const planSnapshot = normalizeStoredPlan(JSON.parse(JSON.stringify({ ...planWithLiveEditors, schoolYear: activeSchoolYear, schoolId, schoolName: schoolDisplayName || String(currentUser?.schoolName || currentUser?.school?.schoolName || ""), gradeLevel: selectedGradeLevel || getPlanGradeLevel(planWithLiveEditors) })));
+    const savingSubject = String(planSnapshot.learningAreas || "Unspecified subject").trim() || "Unspecified subject";
     if (approvedEditSubmissionId) {
       const target = submissions.find(item => item.id === approvedEditSubmissionId);
       if (!target) {
@@ -2213,7 +2714,7 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
       const message = `Subject: ${savingSubject}\nSession ${savingSessionNumber} was saved successfully. The complete lesson plan was updated, and its existing approval remains valid; no reapproval or duplicate submission was created.`;
       setSavedMessage(message);
       setWorkflowMessage(`Session ${savingSessionNumber} saved successfully.`);
-      await showMessageWindow({ title: `Session ${savingSessionNumber} Saved — ${savingSubject}`, message, mode: "info" });
+      if (showSuccessDialog) await showMessageWindow({ title: `Session ${savingSessionNumber} Saved — ${savingSubject}`, message, mode: "info" });
       return true;
     }
     try {
@@ -2230,6 +2731,9 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
       await setDoc(doc(db, PLAN_RECORDS_COLLECTION, recordId), {
         ownerUid: uid,
         ownerEmail: String(currentUser?.email || currentUser?.profile?.email || ""),
+        schoolId: planSnapshot.schoolId || schoolId,
+        schoolYear: getPlanSchoolYear(planSnapshot),
+        gradeLevel: getPlanGradeLevel(planSnapshot),
         plan: planSnapshot,
         term: String(planSnapshot.term || "1"),
         week: String(planSnapshot.week || "1"),
@@ -2259,17 +2763,26 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
       setSavedPlans(nextSavedPlans);
       setPlan(planSnapshot);
       setSavedPlanSignature(JSON.stringify(planSnapshot));
-      // Saving only saves the current lesson plan/session. It must never send
-      // the teacher to Approval; the teacher completes the remaining ILAW parts
-      // and chooses the Approval section explicitly when ready.
-      setActiveNavigationSection("03");
+      // Allow the teacher to proceed to Approval after saving, even when ILAW parts are incomplete.
+      // Completion can be addressed during review; Reflection remains optional.
+      const savedPlanReadyForApproval = Boolean(lessonInformationComplete);
+      const savedSessionSubmission = submissions.find(item =>
+        item.teacherEmail?.trim().toLowerCase() === teacherEmail &&
+        planListIdentity(item.plan) === planListIdentity(planSnapshot)
+      );
+      const savedSessionIsApproved = Boolean(savedSessionSubmission && (
+        (savedSessionSubmission.approvedSessionIds || []).includes(activeSessionTab) ||
+        savedSessionSubmission.sessionStatuses?.[activeSessionTab] === "approved" ||
+        (savedSessionSubmission.status === "approved" && !(savedSessionSubmission.plan.sessions || []).some(session => session.id === activeSessionTab))
+      ));
+      setActiveNavigationSection(savedSessionIsApproved || !savedPlanReadyForApproval ? "03" : "07");
       setObjectivesApplyTargetsBySession(planSnapshot.objectivesApplyTargetsBySession || {});
       setIntentionApplyTargetsBySession(planSnapshot.intentionApplyTargetsBySession || {});
       setSelectedTerm(String(planSnapshot.term || "1"));
       setSelectedWeek(String(planSnapshot.week || "1"));
       const message = `Subject: ${savingSubject}\nSession ${savingSessionNumber} for Term ${planSnapshot.term}, Week ${planSnapshot.week} was updated in the database.`;
       setSavedMessage(message); setWorkflowMessage(`Session ${savingSessionNumber} saved successfully.`); setCloudMessage(`Session ${savingSessionNumber} saved to the database successfully.`);
-      await showMessageWindow({ title: `Session ${savingSessionNumber} Saved — ${savingSubject}`, message, mode: "info" });
+      if (showSuccessDialog) await showMessageWindow({ title: `Session ${savingSessionNumber} Saved — ${savingSubject}`, message, mode: "info" });
       return true;
     } catch (error) {
       console.error("ILAW database save failed:", error);
@@ -2297,10 +2810,15 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
         intentionApplyTargetsBySession: JSON.parse(JSON.stringify(intentionApplyTargetsBySession)),
       learnerContextApplyTargetsBySession: JSON.parse(JSON.stringify(learnerContextApplyTargetsBySession)),
       lessonSubtitleApplyTargetsBySession: JSON.parse(JSON.stringify(plan.lessonSubtitleApplyTargetsBySession || {})),
+        schoolYear: activeSchoolYear, schoolId, schoolName: schoolDisplayName || String(currentUser?.schoolName || currentUser?.school?.schoolName || ""),
+        gradeLevel: selectedGradeLevel || getPlanGradeLevel(updatedPlan),
       })));
       await setDoc(doc(db, PLAN_RECORDS_COLLECTION, planRecordId(planSnapshot, uid)), {
         ownerUid: uid,
         ownerEmail: String(currentUser?.email || currentUser?.profile?.email || ""),
+        schoolId: planSnapshot.schoolId || schoolId,
+        schoolYear: getPlanSchoolYear(planSnapshot),
+        gradeLevel: getPlanGradeLevel(planSnapshot),
         plan: planSnapshot,
         term: String(planSnapshot.term || "1"),
         week: String(planSnapshot.week || "1"),
@@ -2366,8 +2884,8 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     };
     const colors = palette[number] || palette["01"];
     return (
-      <section data-ilaw-section={number} className={`${number === "03" ? "overflow-visible" : "overflow-hidden"} rounded-xl border ${colors.border} border-l-4 ${colors.accent} bg-white shadow-sm`}>
-        <div className={`border-b ${colors.border} ${colors.header} px-4 py-3`}>
+      <section data-ilaw-section={number} className={`mx-auto w-full max-w-[1800px] ${number === "03" ? "overflow-visible" : "overflow-hidden"} rounded-xl border ${colors.border} border-l-4 ${colors.accent} bg-white px-4 py-3 shadow-sm sm:px-6 sm:py-4 lg:px-8 lg:py-5`}>
+        <div className={`border-b ${colors.border} ${colors.header} -mx-4 -mt-2 mb-4 px-4 py-4 sm:-mx-6 sm:-mt-3 sm:px-6 lg:-mx-8 lg:-mt-4 lg:px-8`}>
           <div className="flex items-center gap-2.5">
             <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[11px] font-black shadow-sm ${colors.badge}`}>{number}</span>
             <div className="min-w-0">
@@ -2397,8 +2915,6 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     'Lesson Objectives — By Session': 'Mga Layunin sa Pagkatuto — Bawat Sesyon',
     'Set the objectives for each session before planning its learning experiences.': 'Itakda ang mga layunin ng bawat sesyon bago planuhin ang mga karanasan sa pagkatuto.',
     'Learning Resources and Opportunities for Integration': 'Kagamitang Pampagkatuto at mga Pagkakataon para sa Integrasyon',
-    'List available, inclusive materials and alternatives for emergencies or limited connectivity.': 'Ilista ang mga magagamit at inklusibong kagamitan, pati mga alternatibo sa emerhensiya o limitadong koneksiyon.',
-    'Meaningful links to another learning area, special topic, or technology; write N/A if none.': 'Makabuluhang ugnayan sa ibang asignatura, natatanging paksa, o teknolohiya; isulat ang N/A kung wala.',
     'Lesson Subtitle Title': 'Pamagat ng Sesyon',
     'Lesson Plan Sequence for Pre-Lesson and Flow': 'Pagkakasunod-sunod ng Aralin para sa Bago ang Aralin at Daloy',
     'Pre-Lesson activities': 'Mga Gawain Bago ang Aralin',
@@ -2406,12 +2922,10 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     'Flow': 'Daloy ng Aralin',
     'Ways Forward / Next Steps': 'Mga Susunod na Hakbang',
     'Extended Learning Opportunities': 'Mga Pagkakataon para sa Pinalawak na Pagkatuto',
-    'Reflection (required to proceed)': 'Pagninilay (kinakailangan upang magpatuloy)',
     'Lesson Title': 'Pamagat ng Aralin',
     'Learning Area': 'Asignatura',
     'Teacher Name(s)': 'Pangalan ng Guro/mga Guro',
     'School Head / Principal Name': 'Pangalan ng Punong-Guro',
-    'Grade Level and Section': 'Baitang at Seksyon',
     'Term': 'Termino',
     'Week': 'Linggo',
     'References': 'Mga Sanggunian',
@@ -2420,11 +2934,7 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     'Learning Objectives': 'Mga Layunin sa Pagkatuto',
     'Learner Context': 'Konteksto ng mga Mag-aaral',
     'Pre-Lesson': 'Bago ang Aralin',
-    'Learning Resources': 'Kagamitang Pampagkatuto',
-    'Opportunities for integration': 'Mga Pagkakataon para sa Integrasyon',
     'Formative Assessment': 'Pagtatayang Formative',
-    'Extended learning opportunities': 'Mga Pagkakataon para sa Pinalawak na Pagkatuto',
-    'Reflections': 'Pagninilay',
     'Ways Forward': 'Mga Susunod na Hakbang',
     'Instructional Coaching Notes': 'Mga Tala para sa Instructional Coaching',
     'Lesson Information': 'Impormasyon ng Aralin',
@@ -2432,13 +2942,10 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     'Intention': 'Intensiyon',
     'Learning Experience': 'Karanasan sa Pagkatuto',
     'Assessment': 'Pagtataya',
-    'School Head Approval': 'Pag-apruba ng Punong-Guro',
     'School Head Review': 'Pagsusuri ng Punong-Guro',
     'Lesson Planning Self-Check / Peer Coaching': 'Sariling Pagsusuri ng Banghay-Aralin / Peer Coaching',
     'Use before submitting or discussing the plan.': 'Gamitin bago isumite o talakayin ang banghay-aralin.',
     'Save draft': 'I-save ang draft',
-    'Back to List': 'Bumalik sa Listahan',
-    'New Plan': 'Bagong Banghay-Aralin',
     'Clear selected lesson': 'I-clear ang napiling aralin',
     'Preview PDF': 'I-preview ang PDF',
     'Draft guidance:': 'Gabay sa draft:',
@@ -2448,26 +2955,15 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     'All weeks': 'Lahat ng linggo',
     'No saved lesson plans match these filters yet.': 'Walang naka-save na banghay-aralin na tumutugma sa mga filter. Kumpletuhin ang banghay-aralin at i-click ang I-save ang draft upang maidagdag ito rito.',
     'Action': 'Aksyon',
-    'Grade / Section': 'Baitang / Seksyon',
-    'View Plan': 'Tingnan ang Banghay-Aralin',
-    'Edit': 'I-edit',
-    'Delete': 'Burahin',
     'My submissions': 'Aking mga isinumite',
     'My Lesson Plan Submissions': 'Aking mga Isinumiteng Banghay-Aralin',
     'Approved and waiting-for-approval lesson plans': 'Mga banghay-araling naaprubahan at naghihintay ng pag-apruba',
     'You have no approved or pending lesson plans yet.': 'Wala ka pang naaprubahan o nakabinbing banghay-aralin.',
-    'Submitted': 'Isinumite',
     'Status': 'Katayuan',
     'For Approval': 'Para sa Pag-apruba',
-    'Approval Remarks (optional)': 'Mga Puna sa Pag-apruba (opsyonal)',
+    'Approval Remarks': 'Mga Puna sa Pag-apruba',
     'Add remarks for the teacher, if any': 'Magdagdag ng puna para sa guro, kung mayroon',
     'Approve Lesson Plan': 'Aprubahan ang Banghay-Aralin',
-    'Approve': 'Aprubahan',
-    'Return': 'Ibalik',
-    'Load plan': 'I-load ang banghay-aralin',
-    'No pending submissions stored in this browser.': 'Walang nakabinbing isinumite na naka-save sa browser na ito.',
-    'No submissions saved in this browser yet.': 'Wala pang naka-save na isinumite sa browser na ito.',
-    'Signature attached': 'Nakalakip ang lagda',
     'Optional notes for the teacher': 'Opsyonal na tala para sa guro',
     'Lesson Plans for Approval': 'Mga Banghay-Aralin na Hihintay ng Pag-apruba',
     'There are no lesson plans waiting for approval in this browser.': 'Walang banghay-araling naghihintay ng pag-apruba sa browser na ito.',
@@ -2480,10 +2976,7 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     'Learning area not specified': 'Hindi tinukoy ang asignatura',
     'Section not specified': 'Hindi tinukoy ang seksyon',
     'No email': 'Walang email',
-    'Remarks:': 'Mga Puna:',
     'By ': 'Ni ',
-    'Current user: ': 'Kasalukuyang user: ',
-    'Reviewer access is available.': 'May access ang tagasuri.',
     'Intentions and appropriate learning competencies are clearly stated.': 'Malinaw na nakasaad ang mga layunin at angkop na kasanayang pampagkatuto.',
     'Intentions are evident across all sections; the plan is coherent.': 'Makikita ang mga layunin sa lahat ng bahagi; magkakaugnay ang banghay-aralin.',
     'Another teacher can implement the learning experience without additional explanation.': 'Maaaring maisagawa ng ibang guro ang karanasan sa pagkatuto nang walang karagdagang paliwanag.',
@@ -2494,12 +2987,10 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     'Assessment produces evidence of whether learning was successful.': 'Nagbibigay ang pagtataya ng ebidensiya kung naging matagumpay ang pagkatuto.',
     'Interventions and next steps are actionable and informed by reflection.': 'Maisasagawa ang mga interbensiyon at susunod na hakbang at nakabatay sa pagninilay.',
     'Enter lesson title': 'Ilagay ang pamagat ng aralin',
-    'Enter teacher name': 'Ilagay ang pangalan ng guro',
     'Select a grade level first': 'Pumili muna ng baitang',
     'Select learning area': 'Pumili ng asignatura',
     'No subjects found for this grade level': 'Walang nahanap na asignatura para sa baitang na ito',
     'All subjects listed for the selected grade level are shown here, regardless of teacher assignment. Changing the grade level refreshes the subject list; choose the learning area for this lesson.': 'Ipinapakita rito ang lahat ng asignatura para sa napiling baitang, anuman ang nakatalagang guro. Kapag binago ang baitang, maa-update ang listahan ng asignatura; piliin ang asignatura para sa araling ito.',
-    'Name of School Head / Principal': 'Pangalan ng Punong-Guro',
     'No principal found; enter name if needed': 'Walang nahanap na punong-guro; ilagay ang pangalan kung kinakailangan',
     'School ID missing; enter school head name': 'Walang School ID; ilagay ang pangalan ng punong-guro',
     "Automatically matched to the signed-in user's school ID. You can enter or correct the name if it is not found.": 'Awtomatikong itinutugma sa School ID ng naka-sign in na user. Maaari mong ilagay o itama ang pangalan kung hindi ito makita.',
@@ -2512,7 +3003,6 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     'Number of Sessions': 'Bilang ng mga Sesyon',
     'session': 'sesyon',
     'Complete Learning Area/s, Name of Teacher/s, Grade Level and Section, Number of Sessions, References, and Declaration of AI use to proceed.': 'Kumpletuhin ang Pamagat ng Aralin, Asignatura/mga Asignatura, Pangalan ng Guro/mga Guro, Baitang at Seksyon, Bilang ng mga Sesyon, Mga Sanggunian, at Pahayag sa Paggamit ng AI upang magpatuloy.',
-    'Proceed to ILAW Lesson Plan': 'Magpatuloy sa Banghay-Aralin ng ILAW',
     'Intention — Shared Across All Sessions': '02. Intensiyon — Para sa Lahat ng Sesyon',
     'Complete the competency standards and learner context once. Write separate Learning Objectives inside each session.': 'Kumpletuhin nang isang beses ang mga pamantayan ng kasanayan at konteksto ng mag-aaral. Isulat ang magkakahiwalay na Layunin sa Pagkatuto sa bawat sesyon.',
     'Apply this Intention to selected sessions': 'Ilapat ang Intensiyong ito sa mga napiling sesyon',
@@ -2523,7 +3013,7 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     'Plan reteaching, enrichment, learner support, referrals, or adjustments based on the assessment.': 'Magplano ng muling pagtuturo, pagpapalawak ng pagkatuto, suporta sa mag-aaral, referral, o mga pagbabago batay sa pagtataya.',
     'Practice, enrichment, or support beyond this session.': 'Pagsasanay, pagpapalawak ng pagkatuto, o suportang lampas sa sesyong ito.',
     'What did learners understand? What needs reteaching or adjusting?': 'Ano ang naunawaan ng mga mag-aaral? Ano ang kailangang ituro muli o baguhin?',
-    'Complete Lesson Information and enter a Reflection for every session before proceeding to Approval.': 'Kumpletuhin ang Impormasyon ng Aralin at maglagay ng Pagninilay para sa bawat sesyon bago magpatuloy sa Pag-apruba.',
+    'Complete all required ILAW parts for every session and save the plan before proceeding to Approval. Reflection is optional.': 'Kumpletuhin at i-save ang lahat ng kinakailangang bahagi ng ILAW para sa bawat sesyon bago magpatuloy sa Pag-apruba. Opsyonal ang Pagninilay.',
     'The lesson plan is complete but has unsaved changes. Save the completed plan to enable Approval.': 'Kumpleto na ang banghay-aralin ngunit may mga pagbabagong hindi pa nai-save. I-save ang kumpletong banghay-aralin upang mabuksan ang Pag-apruba.',
     'Proceed to Approval and Printing': 'Magpatuloy sa Pag-apruba at Pagpi-print',
     'Record the formative assessment for each session. Use the editor toolbar to format responses and insert tables.': 'Itala ang formative assessment para sa bawat sesyon. Gamitin ang toolbar ng editor upang ayusin ang format ng mga sagot at maglagay ng mga talahanayan.',
@@ -2531,9 +3021,8 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     'Save Self-Check / Peer Coaching': 'I-save ang Sariling Pagsusuri / Peer Coaching',
     'Complete the next steps for each session. These entries are saved with the corresponding session and included in the lesson plan printout.': 'Kumpletuhin ang mga susunod na hakbang para sa bawat sesyon. Naka-save ang mga ito kasama ng kaukulang sesyon at isinasama sa naka-print na banghay-aralin.',
     'Ways Forward for Session': 'Mga Susunod na Hakbang para sa Sesyon',
-    'Next steps: reteaching, enrichment, learner support, referrals, or adjustments for the next lesson...': 'Mga susunod na hakbang: muling pagtuturo, pagpapalawak ng pagkatuto, suporta sa mag-aaral, referral, o pagbabago para sa susunod na aralin...',
-    'Reflections (required to proceed)': 'Pagninilay (kinakailangan upang magpatuloy)',
-    'Overall Reflections': 'Pangkalahatang Pagninilay',
+    'Extended learning opportunities': 'Mga Pagkakataon para sa Pinalawak na Pagkatuto',
+    'Reflections': 'Pagninilay',
     'After teaching all sessions: what changed in learner understanding? What should be adjusted, extended, or shared?': 'Matapos ituro ang lahat ng sesyon: ano ang nagbago sa pag-unawa ng mga mag-aaral? Ano ang dapat baguhin, palawakin, o ibahagi?',
     'Submission and Approval': 'Pagsusumite at Pag-apruba',
     'Submit the current lesson plan for review by the school head.': 'Isumite ang kasalukuyang banghay-aralin upang masuri ng punong-guro.',
@@ -2541,50 +3030,57 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     'Save Changes first': 'I-save muna ang mga Pagbabago',
     'Lesson Plans with Approved Sessions': 'Mga Banghay-Araling may mga Naaprubahang Sesyon',
     'These plans contain sessions approved individually by the School Head. Approval applies to each listed session, not automatically to the entire week.': 'Ang mga banghay-araling ito ay may mga sesyong inaprubahan nang paisa-isa ng punong-guro. Ang pag-apruba ay para sa bawat nakalistang sesyon, hindi awtomatikong para sa buong linggo.',
-    'No approved lesson plans are available for your account yet.': 'Wala pang naaprubahang banghay-aralin para sa iyong account.',
+    'Signature attached': 'Nakalakip ang lagda',
     'View Coaching Notes': 'Tingnan ang mga Tala sa Coaching',
-    'Save Changes': 'I-save ang mga Pagbabago',
+    'Back to List': 'Bumalik sa Listahan',
+    'New Plan': 'Bagong Banghay-Aralin',
     'Clear': 'I-clear',
     'Complete': 'Kumpleto',
     'Completed': 'Nakumpleto',
     'Needs entry': 'Kailangang punan',
-    'View PDF / Print': 'Tingnan ang PDF / I-print',
+    'Reviewer access is available.': 'May access ang tagasuri.',
     'Enter the subtitle/title (optional)': 'Ilagay ang pamagat/subtitle (opsyonal)',
-    'Title is not required': 'Hindi kinakailangan ang pamagat',
     'Select a lesson sequence…': 'Pumili ng pagkakasunod-sunod ng aralin…',
     'Selecting a sequence automatically fills Pre-Lesson, Flow, and the Formative Assessment text in Assessment. You can edit the generated text to fit your lesson.': 'Kapag pumili ng pagkakasunod-sunod, awtomatikong mapupunan ang Bago ang Aralin, Daloy, at Pagtatayang Formative sa 04. Pagtataya. Maaari mong i-edit ang nabuong teksto upang umangkop sa iyong aralin.',
     'Prepare learners, activate prior knowledge, clarify objectives, and check readiness for this session.': 'Ihanda ang mga mag-aaral, buhayin ang dating kaalaman, linawin ang mga layunin, at suriin ang kahandaan para sa sesyong ito.',
     'e.g. Guided exploration — 45 minutes': 'hal. Gabay na paggalugad — 45 minuto',
-    'Save Session': 'I-save ang Sesyon',
-    "Saves the complete lesson plan, including all sessions and this session's latest entries.": 'Sine-save ang buong banghay-aralin, kasama ang lahat ng sesyon at pinakabagong inilagay sa sesyong ito.',
     "Complete each session's Reflection to proceed. The last session remains accessible so you can enter its Reflection; Preview PDF unlocks when every session has a Reflection.": 'Kumpletuhin ang Pagninilay ng bawat sesyon upang magpatuloy. Mananatiling maa-access ang huling sesyon upang mailagay ang Pagninilay nito; mabubuksan ang I-preview ang PDF kapag may Pagninilay na ang bawat sesyon.',
     'Session': 'Sesyon',
     'of': 'sa',
+    'Save Session': 'I-save ang Sesyon',
+    "Saves the complete lesson plan, including all sessions and this session's latest entries.": 'Sine-save ang buong banghay-aralin, kasama ang lahat ng sesyon at pinakabagong inilagay sa sesyong ito.',
     'Save approved-plan edits to the existing submission': 'I-save ang mga pagbabago sa naaprubahang banghay-aralin sa kasalukuyang pagsusumite',
     'Save the lesson plan from Session': 'I-save ang banghay-aralin mula sa Sesyon',
+    'Save Changes': 'I-save ang mga Pagbabago',
     'Previous Session': 'Nakaraang Sesyon',
     'Next Session': 'Susunod na Sesyon',
-    'Submit the lesson plan for School Head approval.': 'Isumite ang banghay-aralin para sa pag-apruba ng punong-guro.',
     'The selected session is already approved. Select an unapproved session to submit or update it.': 'Naaprubahan na ang napiling sesyon. Pumili ng sesyong hindi pa aprubado upang isumite o i-update ito.',
     'Save changes to the existing approved lesson plan; no reapproval is required.': 'I-save ang mga pagbabago sa kasalukuyang naaprubahang banghay-aralin; hindi na kailangan ng panibagong pag-apruba.',
-    'Pop-up blocked': 'Na-block ang pop-up',
+    'Submit the lesson plan for School Head approval.': 'Isumite ang banghay-aralin para sa pag-apruba ng punong-guro.',
+    'No submissions saved in this browser yet.': 'Wala pang isinumiteng naka-save sa browser na ito.',
     'Please allow pop-ups for this site to view the approved ILAW PDF preview.': 'Payagan ang mga pop-up para sa site na ito upang makita ang PDF preview ng naaprubahang banghay-aralin ng ILAW.',
     'Preparing ILAW PDF Preview': 'Inihahanda ang PDF Preview ng ILAW',
     'Preparing approved ILAW Lesson Plan…': 'Inihahanda ang naaprubahang Banghay-Aralin ng ILAW…',
     'Print': 'I-print',
+    'No approved lesson plans are available for your account yet.': 'Wala pang naaprubahang banghay-aralin para sa iyong account.',
     'Approved by': 'Inaprubahan ni',
+    'Remarks:': 'Mga Puna:',
+    'Overall Reflections': 'Pangkalahatang Pagninilay',
+    'Current user: ': 'Kasalukuyang user: ',
     'Select Week Number': 'Pumili ng Numero ng Linggo',
     'Cancel': 'Kanselahin',
-    'All your saved drafts, pending submissions, and approved lesson plans': 'Lahat ng iyong naka-save na draft, nakabinbing pagsusumite, at naaprubahang banghay-aralin',
-    'Term / Week': 'Termino / Linggo',
+    'Showing saved drafts and submitted lesson plans for School Year {activeSchoolYear}': 'Lahat ng iyong naka-save na draft, nakabinbing pagsusumite, at naaprubahang banghay-aralin',
     'Date': 'Petsa',
     'Teacher': 'Guro',
+    'Submitted': 'Isinumite',
     'Draft': 'Draft',
     'Open Draft': 'Buksan ang Draft',
+    'View Plan': 'Tingnan ang Banghay-Aralin',
     'Request Edit': 'Humiling ng Pag-edit',
-    'Complete Approved Delete': 'Kumpletuhin ang Naaprubahang Pagbura',
     'Request Delete': 'Humiling ng Pagbura',
     'Edit Approved Plan': 'I-edit ang Naaprubahang Banghay-Aralin',
+    'Edit': 'I-edit',
+    'Delete': 'Burahin',
     'All Sessions Individually Approved': 'Indibidwal na Naaprubahan ang Lahat ng Sesyon',
     'Edit Approved Plan · Changes Allowed': 'Naaprubahang Banghay-Aralin · Pinapayagan ang mga Pagbabago',
     'Session Returned for Revision': 'Ibinalik ang Sesyon para sa Pagwawasto',
@@ -2600,27 +3096,47 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     'Your reason:': 'Dahilan mo:',
     'Reason for rejection / reviewer note:': 'Dahilan ng pagtanggi / tala ng tagasuri:',
     'No reviewer note was provided.': 'Walang ibinigay na tala ang tagasuri.',
+    'Complete Approved Delete': 'Kumpletuhin ang Naaprubahang Pagbura',
     'Each session is approved or returned independently. Approving one session does not approve or lock the other sessions in the same week.': 'Hiwalay na inaaprubahan o ibinabalik ang bawat sesyon. Ang pag-apruba sa isang sesyon ay hindi nangangahulugang aprubado o naka-lock na ang iba pang sesyon sa parehong linggo.',
+    'Term / Week': 'Termino / Linggo',
+    'Grade / Section': 'Baitang / Seksyon',
     'School logo': 'Logo ng paaralan',
     'Reflection': 'Pagninilay',
     'Go to Reflection for Last Session': 'Pumunta sa Pagninilay ng Huling Sesyon',
     '04 · Assessment': '04 · Pagtataya',
+    'Next steps: reteaching, enrichment, learner support, referrals, or adjustments for the next lesson...': 'Mga susunod na hakbang: muling pagtuturo, pagpapalawak ng pagkatuto, suporta sa mag-aaral, referral, o pagbabago para sa susunod na aralin...',
     'Practice, enrichment, or support beyond this session...': 'Pagsasanay, pagpapalawak ng pagkatuto, o suportang lampas sa sesyong ito...',
+    'No pending submissions stored in this browser.': 'Walang nakabinbing pagsusumite na naka-save sa browser na ito.',
+    'Load plan': 'I-load ang banghay-aralin',
+    'Approve': 'Aprubahan',
+    'Return': 'Ibalik',
+    'View PDF / Print': 'Tingnan ang PDF / I-print',
     'Approved': 'Naaprubahan',
     'Pending': 'Nakabinbin',
+    'School Head Approval': 'Pag-apruba ng Punong-Guro',
     'References (books, websites, toolkits, etc.)': 'Mga Sanggunian (aklat, website, toolkit, atbp.)',
     'List references and links.': 'Ilista ang mga sanggunian at link.',
     'Name of Teacher/s': 'Pangalan ng Guro/mga Guro',
+    'Name of School Head / Principal': 'Pangalan ng Punong-Guro',
+    'Enter teacher name': 'Ilagay ang pangalan ng guro',
+    'Learning Resources': 'Kagamitang Pampagkatuto',
+    'List available, inclusive materials and alternatives for emergencies or limited connectivity.': 'Ilista ang mga magagamit at inklusibong kagamitan, pati mga alternatibo sa emerhensiya o limitadong koneksiyon.',
+    'Opportunities for integration': 'Mga Pagkakataon para sa Integrasyon',
+    'Meaningful links to another learning area, special topic, or technology; write N/A if none.': 'Makabuluhang ugnayan sa ibang asignatura, natatanging paksa, o teknolohiya; isulat ang N/A kung wala.',
     'Week Number': 'Numero ng Linggo',
     'Go to the ILAW Lesson Plans list': 'Pumunta sa listahan ng mga Banghay-Aralin ng ILAW',
     'Approved lesson plans cannot be cleared here.': 'Hindi maaaring i-clear dito ang mga naaprubahang banghay-aralin.',
     'Clear the selected lesson plan': 'I-clear ang napiling banghay-aralin',
+    'Title is not required': 'Hindi kinakailangan ang pamagat',
+    'Proceed to ILAW Lesson Plan': 'Magpatuloy sa Banghay-Aralin ng ILAW',
     'School Head / Principal': 'Punong-Guro',
+    'Grade Level and Section': 'Baitang at Seksyon',
     'Learning Area/s': 'Asignatura/mga Asignatura',
     'Term Number': 'Numero ng Termino',
     'Approved lesson plan opened.': 'Binuksan ang naaprubahang banghay-aralin.',
     'Pending lesson plan opened.': 'Binuksan ang nakabinbing banghay-aralin.',
     'Draft opened.': 'Binuksan ang draft.',
+    'Pop-up blocked': 'Na-block ang pop-up',
     'School Head Instructional Coaching Notes loaded in Section 06 — Rubric / Peer Coaching.': 'Na-load ang mga tala ng Instructional Coaching ng Punong-Guro sa Seksyon 06 — Rubric / Peer Coaching.',
     'Approve Session': 'Aprubahan ang Sesyon',
     'Return This Session': 'Ibalik ang Sesyong Ito',
@@ -2630,6 +3146,9 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
 
   const currentTeacherEmail = String(currentUser?.email || "").trim().toLowerCase();
   const planListIdentity = (item: Plan) => [
+    item.schoolId || "",
+    getPlanSchoolYear(item),
+    getPlanGradeLevel(item),
     item.term || "1",
     item.week || "1",
     item.learningAreas || "",
@@ -2726,9 +3245,99 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
       setSavedMessage("Could not update the lesson plan in the database. Check your connection and permissions.");
     }
   };
-  const teacherSubmissions = submissions
-    .filter(item => item.teacherEmail === currentTeacherEmail && (item.status === "pending" || item.status === "approved" || item.status === "returned"))
+  // The submissions workspace is limited to the active school year. Prefer the
+  // school-year value supplied by the parent/user profile; otherwise derive it
+  // from the current date (DepEd school-year cycle: June through May).
+  const requestedSchoolYear = String(currentSchoolYear || currentUser?.currentSchoolYear || currentUser?.schoolYear || currentUser?.currentSY || getSchoolYearLabel(new Date())).trim();
+  const activeSchoolYearYears = requestedSchoolYear.match(/\d{4}/g) || [];
+  const activeSchoolYear = activeSchoolYearYears.length >= 2
+    ? `${activeSchoolYearYears[0]}-${activeSchoolYearYears[1]}`
+    : activeSchoolYearYears.length === 1
+      ? `${activeSchoolYearYears[0]}-${Number(activeSchoolYearYears[0]) + 1}`
+      : getSchoolYearLabel(new Date());
+  // Teacher submissions are filtered by the actual section assigned to each plan,
+  // rather than by grade level. A plan may contain more than one selected section.
+  const getPlanSectionNames = (item: any): string[] => String(item?.gradeSection || item?.gradeLevelAndSection || "")
+    .split(",").map((value: string) => value.trim()).filter(Boolean);
+  const teacherSectionFilterOptions = [...new Set([
+    ...submissions.filter(item => item.teacherEmail === currentTeacherEmail).flatMap(item => getPlanSectionNames(item.plan)),
+    ...savedPlans.flatMap(item => getPlanSectionNames(item)),
+  ])].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const matchesTeacherSection = (item: any) => !teacherSubmissionSectionFilter ||
+    getPlanSectionNames(item?.plan || item).some(section => section.toLowerCase() === teacherSubmissionSectionFilter.toLowerCase());
+  const allTeacherSubmissions = submissions
+    .filter(item => item.teacherEmail === currentTeacherEmail && (item.status === "pending" || item.status === "approved" || item.status === "returned") &&
+      String(item.plan.schoolId || "") === String(schoolId || "") && matchesTeacherSection(item))
     .sort((a, b) => new Date(b.reviewedAt || b.submittedAt).getTime() - new Date(a.reviewedAt || a.submittedAt).getTime());
+  const allSchoolSavedPlans = savedPlans.filter(draft => String(draft.schoolId || "") === String(schoolId || "") && matchesTeacherSection(draft));
+  const schoolYearFilterOptions = [...new Set([
+    activeSchoolYear,
+    ...allTeacherSubmissions.map(item => getPlanSchoolYear(item.plan)),
+    ...allSchoolSavedPlans.map(item => getPlanSchoolYear(item)),
+  ].filter(Boolean))].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+  const selectedListSchoolYear = listSchoolYearFilter === "current" ? activeSchoolYear : listSchoolYearFilter;
+  const teacherSubmissions = allTeacherSubmissions.filter(item => getPlanSchoolYear(item.plan) === selectedListSchoolYear);
+  const currentYearSavedPlans = allSchoolSavedPlans.filter(draft => getPlanSchoolYear(draft) === selectedListSchoolYear);
+  const visibleSavedPlans = currentYearSavedPlans.filter(draft => !teacherSubmissions.some(sub => planListIdentity(sub.plan) === planListIdentity(draft)));
+  const planFilterSources = [...teacherSubmissions.map(item => item.plan), ...visibleSavedPlans];
+  const getSubjectKey = (value: any) => String(value || "Untitled Learning Area").trim().toLowerCase();
+
+  // Populate the subject filter from the subjects already represented in
+  // My Lesson Plan Submissions (submitted plans and visible saved drafts).
+  const getPlanSubjectNames = (item: any): string[] => String(
+    item?.learningAreas || item?.learningArea || item?.subject || ""
+  ).split(/[,;|]/).map((subject: string) => subject.trim()).filter(Boolean);
+
+  // Stable subject colors: the same learning area keeps the same color in
+  // every submission and draft card, while different subjects are visually distinct.
+  const getSubjectColorClasses = (subjectValue: any) => {
+    const subject = String(subjectValue || "Untitled Learning Area").trim().toLowerCase();
+    const palette = [
+      { header: "bg-blue-50/90 dark:bg-blue-950/35", border: "border-blue-200 dark:border-blue-900", text: "text-blue-800 dark:text-blue-300", accent: "bg-blue-500" },
+      { header: "bg-emerald-50/90 dark:bg-emerald-950/35", border: "border-emerald-200 dark:border-emerald-900", text: "text-emerald-800 dark:text-emerald-300", accent: "bg-emerald-500" },
+      { header: "bg-violet-50/90 dark:bg-violet-950/35", border: "border-violet-200 dark:border-violet-900", text: "text-violet-800 dark:text-violet-300", accent: "bg-violet-500" },
+      { header: "bg-amber-50/90 dark:bg-amber-950/35", border: "border-amber-200 dark:border-amber-900", text: "text-amber-800 dark:text-amber-300", accent: "bg-amber-500" },
+      { header: "bg-rose-50/90 dark:bg-rose-950/35", border: "border-rose-200 dark:border-rose-900", text: "text-rose-800 dark:text-rose-300", accent: "bg-rose-500" },
+      { header: "bg-cyan-50/90 dark:bg-cyan-950/35", border: "border-cyan-200 dark:border-cyan-900", text: "text-cyan-800 dark:text-cyan-300", accent: "bg-cyan-500" },
+      { header: "bg-orange-50/90 dark:bg-orange-950/35", border: "border-orange-200 dark:border-orange-900", text: "text-orange-800 dark:text-orange-300", accent: "bg-orange-500" },
+      { header: "bg-fuchsia-50/90 dark:bg-fuchsia-950/35", border: "border-fuchsia-200 dark:border-fuchsia-900", text: "text-fuchsia-800 dark:text-fuchsia-300", accent: "bg-fuchsia-500" },
+      { header: "bg-teal-50/90 dark:bg-teal-950/35", border: "border-teal-200 dark:border-teal-900", text: "text-teal-800 dark:text-teal-300", accent: "bg-teal-500" },
+      { header: "bg-indigo-50/90 dark:bg-indigo-950/35", border: "border-indigo-200 dark:border-indigo-900", text: "text-indigo-800 dark:text-indigo-300", accent: "bg-indigo-500" },
+    ];
+    let hash = 0;
+    for (let index = 0; index < subject.length; index += 1) {
+      hash = (hash * 31 + subject.charCodeAt(index)) >>> 0;
+    }
+    return palette[hash % palette.length];
+  };
+
+  const assignedSubjectFilterOptions = [...new Set(
+    planFilterSources.flatMap(getPlanSubjectNames)
+  )].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+
+  const termFilterOptions = [...new Set(planFilterSources.map(item => String(item.term || "1")))]
+    .sort((a, b) => Number(a) - Number(b));
+  const weekFilterOptions = [...new Set(planFilterSources
+    .filter(item => listTermFilter === "all" || String(item.term || "1") === listTermFilter)
+    .map(item => String(item.week || "1")))]
+    .sort((a, b) => Number(a) - Number(b));
+
+  const matchesAssignedSubject = (item: any) => {
+    if (listSubjectFilter === "all") return true;
+    const learningAreas = String(item?.plan?.learningAreas || item?.learningAreas || "")
+      .split(/[,;|]/)
+      .map((subject: string) => subject.trim().toLowerCase())
+      .filter(Boolean);
+    return learningAreas.includes(listSubjectFilter.trim().toLowerCase());
+  };
+  const matchesTermWeekFilters = (item: any) =>
+    matchesAssignedSubject(item) &&
+    (listTermFilter === "all" || String(item?.plan?.term || item?.term || "1") === listTermFilter) &&
+    (listWeekFilter === "all" || String(item?.plan?.week || item?.week || "1") === listWeekFilter);
+  const filteredTeacherSubmissions = teacherSubmissions.filter(matchesTermWeekFilters);
+  const filteredVisibleSavedPlans = visibleSavedPlans.filter(matchesTermWeekFilters);
+  const submissionSubjectGroups = [...new Map(filteredTeacherSubmissions.map(item => [getSubjectKey(item.plan.learningAreas), item.plan.learningAreas || "Untitled Learning Area"])).entries()];
+  const draftSubjectGroups = [...new Map(filteredVisibleSavedPlans.map(item => [getSubjectKey(item.learningAreas), item.learningAreas || "Untitled Learning Area"])).entries()];
   // Carry-over choices include sessions marked Not Executed in either the
   // previous week or the current selected week, for the same term and learning area.
   // Merge the active plan, drafts, and submitted plans while avoiding duplicates.
@@ -2912,24 +3521,27 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     setSelectedSubject(subject);
     setWorkflowMessage("");
     if (!term || !week || !subject) return;
-    // Keep plans for different subjects separate even when their term and week match.
-    const matchingSubmission = teacherSubmissions.find(item =>
-      String(item.plan.term || "1") === term &&
-      String(item.plan.week || "1") === week &&
-      String(item.plan.learningAreas || "").trim().toLowerCase() === subject.trim().toLowerCase()
-    );
-    const matchingDraft = [...savedPlans].reverse().find(item =>
-      String(item.term || "1") === term &&
-      String(item.week || "1") === week &&
-      String(item.learningAreas || "").trim().toLowerCase() === subject.trim().toLowerCase()
-    );
+    // Search the complete set for the signed-in teacher in the active school year.
+    // The submissions list may be showing a different School Year filter, so do not
+    // use the currently displayed list when opening a plan from this modal.
+    const selectedGradeKey = String(selectedGradeLevel || "").replace(/^grade\s*/i, "").trim().toLowerCase();
+    const subjectKey = subject.trim().toLowerCase();
+    const matchesSelection = (candidate: any) =>
+      String(candidate?.term || "1") === term &&
+      String(candidate?.week || "1") === week &&
+      String(candidate?.learningAreas || "").trim().toLowerCase() === subjectKey &&
+      getPlanGradeLevel(candidate) === selectedGradeKey &&
+      getPlanSchoolYear(candidate) === activeSchoolYear &&
+      String(candidate?.schoolId || "") === String(schoolId || "");
+    const matchingSubmission = allTeacherSubmissions.find(item => matchesSelection(item.plan));
+    const matchingDraft = [...allSchoolSavedPlans].reverse().find(matchesSelection);
     const existingPlan = matchingSubmission?.plan || matchingDraft;
     if (existingPlan) {
-      openOrLoadPlan({ ...existingPlan, term, week, learningAreas: subject }, matchingSubmission
+      openOrLoadPlan({ ...existingPlan, term, week, learningAreas: subject, schoolId, schoolName: schoolDisplayName, schoolYear: activeSchoolYear, gradeLevel: selectedGradeLevel }, matchingSubmission
         ? `Loaded your ${matchingSubmission.status} lesson plan for Term ${term}, Week ${week}, ${subject}.`
         : `Loaded the saved lesson plan for Term ${term}, Week ${week}, ${subject}.`);
     } else {
-      openOrLoadPlan({ ...blankPlan(), term, week, learningAreas: subject }, `No existing lesson plan for Term ${term}, Week ${week}, ${subject}. A blank form is ready.`);
+      openOrLoadPlan({ ...blankPlan(), term, week, learningAreas: subject, schoolId, schoolName: schoolDisplayName, schoolYear: activeSchoolYear, gradeLevel: selectedGradeLevel }, `No existing lesson plan for Term ${term}, Week ${week}, ${subject}. A blank form is ready.`);
     }
   };
 
@@ -2938,17 +3550,20 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
 
   if (isSystemAdmin) {
     const adminSubmissions = submissions
-      .filter(item => item.status === "pending" || item.status === "approved" || item.status === "returned")
+      .filter(item => (item.status === "pending" || item.status === "approved" || item.status === "returned") &&
+        String(item.plan.schoolId || "") === String(schoolId || "") && getPlanSchoolYear(item.plan) === activeSchoolYear &&
+        (!selectedGradeLevel || getPlanGradeLevel(item.plan) === String(selectedGradeLevel).replace(/^grade\s*/i, "").toLowerCase()))
       .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
     const adminPendingCount = adminSubmissions.filter(item => item.status === "pending").length;
     const adminApprovedCount = adminSubmissions.filter(item => item.status === "approved").length;
     return (
-      <div className="w-full min-w-0 space-y-5 text-slate-800">
+      <div className="w-full max-w-none min-w-0 space-y-5 text-slate-800">
         {messageWindow}
-        <header className="flex flex-col gap-3 rounded-2xl border border-indigo-100 bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
+        <header className="flex w-full flex-col gap-3 rounded-none border-y border-indigo-100 bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
           <div><p className="text-xs font-bold uppercase tracking-widest text-indigo-600">System Administration</p><h1 className="text-2xl font-black text-slate-900">ILAW Lesson Plan Management</h1><p className="mt-1 text-sm text-slate-600">Manage pending and approved lesson plans, and review teacher requests to edit or delete approved plans.</p></div>
-          <div className="flex flex-wrap gap-2"><span className="rounded-full bg-amber-100 px-3 py-1.5 text-sm font-extrabold text-amber-800">{adminPendingCount} Pending</span><span className="rounded-full bg-emerald-100 px-3 py-1.5 text-sm font-extrabold text-emerald-800">{adminApprovedCount} Approved</span></div>
+          <div className="flex flex-wrap gap-3"><span className="rounded-full bg-amber-100 px-3 py-1.5 text-sm font-extrabold text-amber-800">{adminPendingCount} Pending</span><span className="rounded-full bg-emerald-100 px-3 py-1.5 text-sm font-extrabold text-emerald-800">{adminApprovedCount} Approved</span></div>
         </header>
+        <div className="w-full min-w-0 px-4 sm:px-6 lg:px-10 xl:px-12">
         {workflowMessage && <p role="status" className="rounded-lg border border-sky-100 bg-sky-50 p-3 text-sm text-sky-800">{workflowMessage}</p>}
         <section className="overflow-hidden rounded-2xl border border-amber-200 bg-white shadow-sm">
           <div className="border-b border-amber-100 bg-amber-50 px-4 py-3"><h2 className="font-extrabold text-slate-900">Approved Plan Edit / Delete Requests</h2><p className="mt-1 text-xs text-slate-600">Review teacher requests before changing an approved ILAW Lesson Plan. Approving Edit unlocks the existing approved submission for its teacher; no duplicate submission is created.</p></div>
@@ -2984,170 +3599,401 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
                   </tr>)}
             </tbody></table></div>}
         </section>
+        </div>
       </div>
     );
   }
 
+  const saveCurrentPlanToLocalStorage = () => {
+    try {
+      const snapshot = normalizeStoredPlan(JSON.parse(JSON.stringify(plan)));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+      const existing = JSON.parse(localStorage.getItem(PLAN_LIST_KEY) || "[]");
+      const list = Array.isArray(existing) ? existing : [];
+      const identity = [
+        snapshot.schoolId, snapshot.schoolYear, snapshot.gradeSection,
+        snapshot.learningAreas, snapshot.term, snapshot.week
+      ].map(value => String(value || "").trim().toLowerCase()).join("|");
+      const next = [...list.filter((item: any) => {
+        const key = [item.schoolId, item.schoolYear, item.gradeSection, item.learningAreas, item.term, item.week]
+          .map(value => String(value || "").trim().toLowerCase()).join("|");
+        return key !== identity;
+      }), snapshot];
+      localStorage.setItem(PLAN_LIST_KEY, JSON.stringify(next));
+      setSavedPlans(next.map(normalizeStoredPlan));
+      setStorageStatus("The current lesson plan was saved to this browser's local storage.");
+    } catch (error) {
+      console.error("Could not save ILAW plan locally:", error);
+      setStorageStatus("Local storage save failed. Check available browser storage.");
+    }
+  };
+
+  // This only refreshes the local-storage list. It never opens or restores
+  // a lesson plan into the Lesson Planning Workspace.
+  const refreshLocalStorageList = () => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(PLAN_LIST_KEY) || "[]");
+      const plans = Array.isArray(raw) ? raw.map(normalizeStoredPlan) : [];
+      setSavedPlans(plans);
+      setStorageStatus(`${plans.length} locally stored lesson plan(s) found on this device. Local plans are not loaded into the workspace.`);
+    } catch (error) {
+      console.error("Could not read the local ILAW storage list:", error);
+      setStorageStatus("Could not read the local storage list. The saved data may be unavailable or invalid.");
+    }
+  };
+
+  const deleteLocalStoragePlan = async (item: Plan) => {
+    const title = item.lessonTitle || `Term ${item.term || "1"}, Week ${item.week || "1"}`;
+    const confirmed = await showMessageWindow({
+      title: "Delete local lesson plan?",
+      message: `Delete “${title}” from this browser's local storage? This will not delete the Firestore cloud copy. This action cannot be undone.`,
+      mode: "confirm",
+      confirmLabel: "Delete locally",
+      danger: true,
+    });
+    if (confirmed !== true) return;
+    const identity = planListIdentity(item);
+    const raw = JSON.parse(localStorage.getItem(PLAN_LIST_KEY) || "[]");
+    const next = (Array.isArray(raw) ? raw : []).filter((saved: any) =>
+      planListIdentity(normalizeStoredPlan(saved)) !== identity
+    );
+    localStorage.setItem(PLAN_LIST_KEY, JSON.stringify(next));
+    const activeRaw = localStorage.getItem(STORAGE_KEY);
+    if (activeRaw) {
+      try {
+        if (planListIdentity(normalizeStoredPlan(JSON.parse(activeRaw))) === identity) {
+          localStorage.removeItem(STORAGE_KEY);
+        }
+      } catch { /* Ignore an invalid active snapshot; the saved list is still updated. */ }
+    }
+    setSavedPlans(next.map(normalizeStoredPlan));
+    setStorageStatus("The lesson plan was deleted from this browser's local storage. Its cloud copy, if any, was not changed.");
+  };
+
+  const deleteFirestoreStoragePlan = async (item: Plan) => {
+    const title = item.lessonTitle || `Term ${item.term || "1"}, Week ${item.week || "1"}`;
+    const confirmed = await showMessageWindow({
+      title: "Delete cloud lesson plan?",
+      message: `Permanently delete “${title}” from Firestore Cloud Storage? This will not delete the local browser copy. This action cannot be undone.`,
+      mode: "confirm",
+      confirmLabel: "Delete from cloud",
+      danger: true,
+    });
+    if (confirmed !== true) return;
+    const uid = String(currentUser?.uid || currentUser?.id || currentUser?.userId || currentUser?.user_id || currentUser?.profile?.uid || currentUser?.profile?.id || "").trim();
+    if (!uid) {
+      setStorageStatus("Sign in before deleting a lesson plan from Firestore.");
+      return;
+    }
+    try {
+      await deleteDoc(doc(db, PLAN_RECORDS_COLLECTION, planRecordId(item, uid)));
+      setCloudStoragePlans(previous => previous.filter(saved => planListIdentity(saved) !== planListIdentity(item)));
+      setStorageStatus("The lesson plan was permanently deleted from Firestore Cloud Storage. Its local copy, if any, was not changed.");
+    } catch (error) {
+      console.error("Could not delete lesson plan from Firestore:", error);
+      setStorageStatus("Cloud deletion failed. Check your internet connection and Firestore permissions.");
+    }
+  };
+
+  const refreshFirestorePlans = async () => {
+    const uid = String(currentUser?.uid || currentUser?.id || currentUser?.userId || currentUser?.user_id || currentUser?.profile?.uid || currentUser?.profile?.id || "").trim();
+    if (!uid) {
+      setStorageStatus("Sign in to view lesson plans stored in Firestore.");
+      return;
+    }
+    setCloudStorageLoading(true);
+    try {
+      const snapshot = await getDocs(query(collection(db, PLAN_RECORDS_COLLECTION), where("ownerUid", "==", uid)));
+      const plans = snapshot.docs.map(entry => {
+        const data = entry.data() as any;
+        return normalizeStoredPlan(data.plan || data);
+      });
+      setCloudStoragePlans(plans);
+      setStorageStatus(`${plans.length} lesson plan(s) retrieved from Firestore Cloud Storage.`);
+    } catch (error) {
+      console.error("Could not retrieve ILAW plans from Firestore:", error);
+      setStorageStatus("Firestore retrieval failed. Check your internet connection and Firestore permissions.");
+    } finally {
+      setCloudStorageLoading(false);
+    }
+  };
+
+
   if (!hasStartedPlan && !isSchoolHead) {
-    const totalPlansCount = teacherSubmissions.length + savedPlans.filter(draft => !teacherSubmissions.some(sub => planListIdentity(sub.plan) === planListIdentity(draft))).length;
     return (
-      <div className="ilaw-print-document m-0 p-0 w-full min-w-0 max-w-none space-y-4 text-slate-800">
+      <div className="flex min-h-screen w-full min-w-0 max-w-none flex-col space-y-4 text-slate-800">
         {messageWindow}
-        {/* Same header structure and styling as main ILAW Lesson Plan */}
-        <div
-          className="no-print relative z-0 box-border m-0 w-screen min-w-0 max-w-none border-b border-slate-200 bg-white p-0 shadow-sm dark:border-slate-800 dark:bg-slate-900"
-          style={{ width: "100vw", maxWidth: "100vw", marginLeft: "calc(50% - 50vw)", backgroundColor: "var(--ilaw-header-background, #ffffff)" }}
-        >
-          {/* Header of ILAW Lesson Plan */}
-          <header className="w-full min-w-0 max-w-none border-b border-slate-100 dark:border-slate-800/80">
-            <div className="flex w-full min-w-0 flex-col items-start justify-between gap-4 px-4 py-3 sm:px-6 md:flex-row md:items-center">
+        {workflowMessage && <p role="status" className="rounded-lg border border-sky-100 bg-sky-50 p-3 text-sm text-sky-800">{workflowMessage}</p>}
+        {showTermWeekModal && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-labelledby="term-week-modal-title">
+          <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
+              <div><p className="text-xs font-bold uppercase tracking-widest text-indigo-600">ILAW Lesson Planning</p><h2 id="term-week-modal-title" className="mt-1 text-lg font-black text-slate-900">Select Term and Week</h2><p className="mt-1 text-sm text-slate-500">Choose both values to load an existing plan or start with a blank form.</p></div>
+              <button type="button" onClick={() => setShowTermWeekModal(false)} aria-label="Close modal" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X size={18} /></button>
+            </div>
+            <div className="grid gap-4 p-5 sm:grid-cols-2">
+              <label className="block"><span className="mb-1.5 block text-sm font-bold text-slate-700">Term <span className="text-rose-600">*</span></span>
+                <select value={selectedTerm} onChange={e => chooseTermWeek(e.target.value, selectedWeek)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100">
+                  <option value="">Select Term</option>{[1,2,3,4].map(n => <option key={n} value={String(n)}>Term {n}</option>)}
+                </select>
+              </label>
+              <label className="block sm:col-span-2"><span className="mb-1.5 block text-sm font-bold text-slate-700">Grade Level <span className="text-rose-600">*</span></span>
+                <select value={selectedGradeLevel} onChange={e => { setSelectedGradeLevel(e.target.value); setSelectedSubject(""); setPlan({ ...blankPlanForCurrentUser(), gradeLevel: e.target.value }); setHasStartedPlan(false); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100">
+                  <option value="">Select Grade Level</option>{termWeekGradeOptions.map(grade => <option key={grade} value={grade}>Grade {grade.replace(/^grade\s*/i, "")}</option>)}
+                </select>
+              </label>
+              <label className="block sm:col-span-2"><span className="mb-1.5 block text-sm font-bold text-slate-700">Subject / Learning Area <span className="text-rose-600">*</span></span>
+                <select value={selectedSubject} onChange={e => { setSelectedSubject(e.target.value); }} disabled={!selectedGradeLevel} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-50">
+                  <option value="">{selectedGradeLevel ? "Select Subject" : "Select a grade level first"}</option>{termWeekSubjectOptions.map(subject => <option key={subject} value={subject}>{subject}</option>)}
+                </select>
+                {selectedGradeLevel && termWeekSubjectOptions.length === 0 && <span className="mt-1 block text-xs text-amber-700">No subjects are available for this grade level.</span>}
+              </label>
+              <label className="block"><span className="mb-1.5 block text-sm font-bold text-slate-700">Week Number <span className="text-rose-600">*</span></span>
+                <select value={selectedWeek} onChange={e => chooseTermWeek(selectedTerm, e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100">
+                  <option value="">{translate("Select Week Number")}</option>{Array.from({ length: 12 }, (_, i) => i + 1).map(n => <option key={n} value={String(n)}>{isFilipino ? `Linggo ${n}` : `Week ${n}`}</option>)}
+                </select>
+              </label>
+            </div>
+            {workflowMessage && <p role="status" className="mx-5 rounded-lg border border-sky-100 bg-sky-50 p-3 text-sm text-sky-800">{workflowMessage}</p>}
+            <div className="flex flex-col-reverse gap-2 border-t border-slate-100 p-5 sm:flex-row sm:justify-end">
+              <button type="button" onClick={() => setShowTermWeekModal(false)} className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50">{translate("Cancel")}</button>
+              {(() => {
+                const selectedGradeKey = String(selectedGradeLevel || "").replace(/^grade\\s*/i, "").trim().toLowerCase();
+                const selectedSubjectKey = selectedSubject.trim().toLowerCase();
+                const hasExistingSelectedPlan = Boolean(selectedTerm && selectedWeek && selectedGradeLevel && selectedSubject && (
+                  allTeacherSubmissions.some(item =>
+                    String(item.plan.term || "1") === selectedTerm &&
+                    String(item.plan.week || "1") === selectedWeek &&
+                    String(item.plan.learningAreas || "").trim().toLowerCase() === selectedSubjectKey &&
+                    getPlanGradeLevel(item.plan) === selectedGradeKey &&
+                    getPlanSchoolYear(item.plan) === activeSchoolYear
+                  ) ||
+                  allSchoolSavedPlans.some(item =>
+                    String(item.term || "1") === selectedTerm &&
+                    String(item.week || "1") === selectedWeek &&
+                    String(item.learningAreas || "").trim().toLowerCase() === selectedSubjectKey &&
+                    getPlanGradeLevel(item) === selectedGradeKey &&
+                    getPlanSchoolYear(item) === activeSchoolYear
+                  )
+                ));
+                return <button type="button" disabled={!selectedTerm || !selectedWeek || !selectedGradeLevel || !selectedSubject} onClick={() => { chooseTermWeek(selectedTerm, selectedWeek, selectedSubject); setActiveSessionTab("session-1"); setHasStartedPlan(true); setShowTermWeekModal(false); }} className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-extrabold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"><BookOpen size={17} /> {hasExistingSelectedPlan ? "View Lesson Plan" : "Create ILAW Lesson Plan"}</button>;
+              })()}
+            </div>
+          </div>
+        </div>}
+        <section className="relative left-1/2 flex min-h-screen w-screen max-w-[100vw] min-w-0 -translate-x-1/2 flex-1 flex-col overflow-visible border-y border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <header className="w-full min-w-0 shrink-0 border-b border-slate-100 bg-white dark:border-slate-800/80 dark:bg-slate-900">
+            <div className="flex w-full min-w-0 flex-col items-start justify-between gap-4 px-4 py-4 sm:px-6 md:flex-row md:items-center">
               <div className="flex w-full min-w-0 items-center gap-4 md:w-auto">
-                {schoolLogo ? (
-                  <img src={schoolLogo} alt="School logo" className="h-9 w-9 shrink-0 object-contain" referrerPolicy="no-referrer" onError={() => setSchoolLogo("")} />
-                ) : (
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-700">
-                    <BookOpen size={19} />
-                  </div>
-                )}
-                {depEdLogo && (
-                  <img src={depEdLogo} alt="DepEd logo" className="h-9 w-9 shrink-0 object-contain" referrerPolicy="no-referrer" onError={() => setDepEdLogo("")} />
-                )}
+                {schoolLogo ? <img src={schoolLogo} alt="School logo" className="h-10 w-10 shrink-0 object-contain" referrerPolicy="no-referrer" onError={() => setSchoolLogo("")} /> : <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-700"><BookOpen size={20} /></div>}
+                {depEdLogo && <img src={depEdLogo} alt="DepEd logo" className="h-10 w-10 shrink-0 object-contain" referrerPolicy="no-referrer" onError={() => setDepEdLogo("")} />}
                 <div className="min-w-0">
-                  <p className="mb-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-indigo-600">
-                    {isFilipino ? "Lugar ng Pagpaplano ng Aralin" : "Lesson planning workspace"}
-                  </p>
-                  {schoolDisplayName && (
-                    <p className="text-xs font-bold uppercase tracking-wide text-slate-600">{schoolDisplayName}</p>
-                  )}
-                  <h1 className="block text-left text-lg font-black leading-tight text-slate-900 dark:text-white">
-                    {isFilipino ? "Banghay-Aralin ng ILAW" : "ILAW Lesson Plan"}
-                  </h1>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
-                    <span className="font-semibold text-slate-700 dark:text-slate-300">
-                      {isFilipino ? "Aking mga Isinumiteng Banghay-Aralin" : "My Lesson Plan Submissions"}
-                    </span>
-                    <span aria-hidden="true" className="text-slate-300">·</span>
-                    <span className="truncate text-slate-600 dark:text-slate-400">
-                      {totalPlansCount} {isFilipino ? (totalPlansCount === 1 ? "plano" : "mga plano") : (totalPlansCount === 1 ? "plan" : "plans")}
-                    </span>
-                  </div>
+                  <p className="mb-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-indigo-600">{isFilipino ? "Lugar ng Pagpaplano ng Aralin" : "Lesson planning workspace"}</p>
+                  {schoolDisplayName && <p className="text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">{schoolDisplayName}</p>}
+                  <h2 className="text-lg font-black leading-tight text-slate-900 dark:text-white">{isFilipino ? "Aking mga Isinumiteng Banghay-Aralin" : "My Lesson Plan Submissions"}</h2>
+                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{isFilipino ? `Taong Panuruan ${activeSchoolYear}` : `School Year ${activeSchoolYear}`}</p>
                 </div>
               </div>
-              <div className="no-print flex w-full flex-wrap items-center gap-2 md:w-auto md:justify-end">
-                <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                  <span>{isFilipino ? "Wika" : "Language"}</span>
-                  <select
-                    value={language}
-                    onChange={e => setLanguage(e.target.value as "fil" | "en")}
-                    className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
-                  >
-                    <option value="fil">Filipino</option>
-                    <option value="en">English</option>
-                  </select>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const currentGrade = sectionGradeFilter || (selectedSections[0] ? sectionGrade(selectedSections[0]) : "");
-                    setSelectedGradeLevel(currentGrade);
-                    setSelectedSubject(String(plan.learningAreas || selectedSubject || ""));
-                    setShowTermWeekModal(true);
-                  }}
-                  className="no-print inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-bold text-indigo-700 shadow-sm transition-colors hover:bg-indigo-50 dark:border-indigo-800 dark:bg-slate-800 dark:text-indigo-300"
-                >
-                  <BookOpen size={15} /> {isFilipino ? "Pumili ng Termino at Linggo" : "Select Term and Week"}
+              <div className="flex w-full shrink-0 flex-wrap items-center gap-2 md:w-auto md:justify-end">
+                <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-200">{teacherSubmissions.length + visibleSavedPlans.length} plans</span>
+                <button type="button" onClick={() => { const currentGrade = sectionGradeFilter || (selectedSections[0] ? sectionGrade(selectedSections[0]) : ""); setSelectedGradeLevel(currentGrade); setSelectedSubject(String(plan.learningAreas || selectedSubject || "")); setShowTermWeekModal(true); }} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-extrabold text-white shadow-sm transition-colors hover:bg-indigo-700">
+                  <BookOpen size={17} /> Select Term and Week
                 </button>
               </div>
             </div>
           </header>
-        </div>
-
-        <div className="w-full space-y-6 px-4 pt-6 pb-12 sm:px-8 sm:pt-8 sm:pb-16">
-          {workflowMessage && <p role="status" className="rounded-lg border border-sky-100 bg-sky-50 p-3 text-sm text-sky-800">{workflowMessage}</p>}
-          {showTermWeekModal && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-labelledby="term-week-modal-title">
-            <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
-              <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
-                <div><p className="text-xs font-bold uppercase tracking-widest text-indigo-600">ILAW Lesson Planning</p><h2 id="term-week-modal-title" className="mt-1 text-lg font-black text-slate-900">Select Term and Week</h2><p className="mt-1 text-sm text-slate-500">Choose both values to load an existing plan or start with a blank form.</p></div>
-                <button type="button" onClick={() => setShowTermWeekModal(false)} aria-label="Close modal" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X size={18} /></button>
+          <div className="flex w-full min-w-0 flex-1 flex-col px-2 py-6 sm:px-4 md:px-6 lg:px-8">
+            {/* Filter lesson plans by school year, assigned subject, term, and week. School remains assigned automatically. */}
+            <div className="mb-5 grid w-full grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/50 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="min-w-0">
+                <label htmlFor="ilaw-list-school-year-filter" className="mb-1.5 block text-xs font-extrabold uppercase tracking-wide text-slate-500 dark:text-slate-400">School Year</label>
+                <select id="ilaw-list-school-year-filter" value={listSchoolYearFilter} onChange={e => { setListSchoolYearFilter(e.target.value); setListTermFilter("all"); setListWeekFilter("all"); }} className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
+                  <option value="current">Current School Year ({activeSchoolYear})</option>
+                  {schoolYearFilterOptions.filter(year => year !== activeSchoolYear).map(year => <option key={year} value={year}>{year}</option>)}
+                </select>
               </div>
-              <div className="grid gap-4 p-5 sm:grid-cols-2">
-                <label className="block"><span className="mb-1.5 block text-sm font-bold text-slate-700">Term <span className="text-rose-600">*</span></span>
-                  <select value={selectedTerm} onChange={e => chooseTermWeek(e.target.value, selectedWeek)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100">
-                    <option value="">Select Term</option>{[1,2,3,4].map(n => <option key={n} value={String(n)}>Term {n}</option>)}
-                  </select>
-                </label>
-                <label className="block sm:col-span-2"><span className="mb-1.5 block text-sm font-bold text-slate-700">Grade Level <span className="text-rose-600">*</span></span>
-                  <select value={selectedGradeLevel} onChange={e => { setSelectedGradeLevel(e.target.value); setSelectedSubject(""); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100">
-                    <option value="">Select Grade Level</option>{termWeekGradeOptions.map(grade => <option key={grade} value={grade}>Grade {grade.replace(/^grade\s*/i, "")}</option>)}
-                  </select>
-                </label>
-                <label className="block sm:col-span-2"><span className="mb-1.5 block text-sm font-bold text-slate-700">Subject / Learning Area <span className="text-rose-600">*</span></span>
-                  <select value={selectedSubject} onChange={e => { setSelectedSubject(e.target.value); }} disabled={!selectedGradeLevel} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-50">
-                    <option value="">{selectedGradeLevel ? "Select Subject" : "Select a grade level first"}</option>{termWeekSubjectOptions.map(subject => <option key={subject} value={subject}>{subject}</option>)}
-                  </select>
-                  {selectedGradeLevel && termWeekSubjectOptions.length === 0 && <span className="mt-1 block text-xs text-amber-700">No subjects are available for this grade level.</span>}
-                </label>
-                <label className="block"><span className="mb-1.5 block text-sm font-bold text-slate-700">Week Number <span className="text-rose-600">*</span></span>
-                  <select value={selectedWeek} onChange={e => chooseTermWeek(selectedTerm, e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100">
-                    <option value="">{translate("Select Week Number")}</option>{Array.from({ length: 12 }, (_, i) => i + 1).map(n => <option key={n} value={String(n)}>{isFilipino ? `Linggo ${n}` : `Week ${n}`}</option>)}
-                  </select>
-                </label>
+              <div className="min-w-0">
+                <label htmlFor="ilaw-list-subject-filter" className="mb-1.5 block text-xs font-extrabold uppercase tracking-wide text-slate-500 dark:text-slate-400">List of Subject Assigned</label>
+                <select id="ilaw-list-subject-filter" value={listSubjectFilter} onChange={e => setListSubjectFilter(e.target.value)} className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
+                  <option value="all">All Assigned Subjects</option>
+                  {assignedSubjectFilterOptions.map(subject => <option key={subject} value={subject}>{subject}</option>)}
+                </select>
+                {assignedSubjectFilterOptions.length === 0 && <p className="mt-1 text-[11px] text-slate-500">No subjects found in My Lesson Plan Submissions for this school year.</p>}
               </div>
-              {workflowMessage && <p role="status" className="mx-5 rounded-lg border border-sky-100 bg-sky-50 p-3 text-sm text-sky-800">{workflowMessage}</p>}
-              <div className="flex flex-col-reverse gap-2 border-t border-slate-100 p-5 sm:flex-row sm:justify-end">
-                <button type="button" onClick={() => setShowTermWeekModal(false)} className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50">{translate("Cancel")}</button>
-                {(() => {
-                  const hasExistingSelectedPlan = Boolean(selectedTerm && selectedWeek && (
-                    teacherSubmissions.some(item => String(item.plan.term || "1") === selectedTerm && String(item.plan.week || "1") === selectedWeek && String(item.plan.learningAreas || "").trim().toLowerCase() === selectedSubject.trim().toLowerCase()) ||
-                    savedPlans.some(item => String(item.term || "1") === selectedTerm && String(item.week || "1") === selectedWeek && String(item.learningAreas || "").trim().toLowerCase() === selectedSubject.trim().toLowerCase())
-                  ));
-                  return <button type="button" disabled={!selectedTerm || !selectedWeek || !selectedGradeLevel || !selectedSubject} onClick={() => { chooseTermWeek(selectedTerm, selectedWeek, selectedSubject); setActiveSessionTab("session-1"); setHasStartedPlan(true); setShowTermWeekModal(false); }} className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-extrabold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"><BookOpen size={17} /> {hasExistingSelectedPlan ? "View Lesson Plan" : "Create ILAW Lesson Plan"}</button>;
-                })()}
+              <div className="min-w-0">
+                <label htmlFor="ilaw-list-term-filter" className="mb-1.5 block text-xs font-extrabold uppercase tracking-wide text-slate-500 dark:text-slate-400">Term</label>
+                <select id="ilaw-list-term-filter" value={listTermFilter} onChange={e => { setListTermFilter(e.target.value); setListWeekFilter("all"); }} className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
+                  <option value="all">All Terms</option>
+                  {termFilterOptions.map(term => <option key={term} value={term}>Term {term}</option>)}
+                </select>
               </div>
+              <div className="min-w-0">
+                <label htmlFor="ilaw-list-week-filter" className="mb-1.5 block text-xs font-extrabold uppercase tracking-wide text-slate-500 dark:text-slate-400">Week</label>
+                <select id="ilaw-list-week-filter" value={listWeekFilter} onChange={e => setListWeekFilter(e.target.value)} className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
+                  <option value="all">All Weeks</option>
+                  {weekFilterOptions.map(week => <option key={week} value={week}>Week {week}</option>)}
+                </select>
+              </div>
+              {(listSchoolYearFilter !== "current" || listSubjectFilter !== "all" || listTermFilter !== "all" || listWeekFilter !== "all") && <div className="flex justify-end sm:col-span-2 lg:col-span-4">
+                <button type="button" onClick={() => { setListSchoolYearFilter("current"); setListSubjectFilter("all"); setListTermFilter("all"); setListWeekFilter("all"); }} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800">Clear filters</button>
+              </div>}
             </div>
-          </div>}
-          <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3"><div><h2 className="font-extrabold text-slate-900">{isFilipino ? "Aking mga Isinumiteng Banghay-Aralin" : "My Lesson Plan Submissions"}</h2><p className="mt-0.5 text-xs text-slate-500">{translate("All your saved drafts, pending submissions, and approved lesson plans")}</p></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">{totalPlansCount} plans</span></div>
-            {(teacherSubmissions.length === 0 && savedPlans.length === 0) ? <p className="p-5 text-sm text-slate-500">{isFilipino ? "Wala pang banghay-aralin. I-save ang draft o magsumite ng banghay-aralin upang makita ito rito." : "No lesson plans yet. Save a draft or submit a lesson plan to see it here."}</p> :
-              <div className="w-full overflow-x-auto">
-                <table className="w-full min-w-[900px] table-fixed border-collapse text-left text-sm">
-                  <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
-                    <tr>
-                      <th className="border-b px-3 py-3">{translate("Term")}</th>
-                      <th className="border-b px-3 py-3">{translate("Week")}</th>
-                      <th className="border-b px-3 py-3">{translate("Learning Area")}</th>
-                      <th className="border-b px-3 py-3">{translate("Status")}</th>
-                      <th className="border-b px-3 py-3">{translate("Action")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                      {teacherSubmissions.map(item =>
-                      <tr key={`submission-${item.id}`} className="border-b border-slate-100 align-top">
-                        <td className="whitespace-nowrap px-3 py-3 font-semibold">Term {item.plan.term || "1"}</td>
-                        <td className="whitespace-nowrap px-3 py-3 font-semibold">Week {item.plan.week || "1"}</td>
-                        <td className="px-3 py-3">{item.plan.learningAreas || "—"}</td>
-                        <td className="whitespace-nowrap px-3 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-extrabold ${item.status === "approved" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{translate(item.status === "approved" ? "Approved" : "Pending")}</span></td>
-                        <td className="px-3 py-3"><div className="flex min-w-[220px] flex-wrap items-center gap-1.5"><button type="button" onClick={() => openOrLoadPlan(item.plan, `${item.status === "approved" ? "Approved" : "Pending"} lesson plan opened.`)} className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-extrabold text-indigo-700 hover:bg-indigo-50">{translate("View Plan")}</button>{item.status === "approved" && <>{changeRequests.some(request => request.submissionId === item.id && request.teacherEmail === currentTeacherEmail && request.type === "delete" && request.status === "approved") ? <button type="button" onClick={() => executeApprovedDeleteRequest(item)} className="inline-flex items-center gap-1 rounded-lg border border-rose-300 bg-rose-600 px-2.5 py-2 text-xs font-bold text-white hover:bg-rose-700"><Trash2 size={12}/> Complete Approved Delete</button> : <button type="button" disabled={changeRequests.some(request => request.submissionId === item.id && request.status === "pending")} onClick={() => requestApprovedPlanChange(item, "delete")} className="inline-flex items-center gap-1 rounded-lg border border-rose-200 px-2.5 py-2 text-xs font-bold text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"><Trash2 size={12}/> Request Delete</button>}</>}{(item.status !== "approved" || item.editApproved) && <button type="button" onClick={() => deleteSubmission(item)} className="inline-flex items-center gap-1 rounded-lg border border-rose-200 px-2.5 py-2 text-xs font-bold text-rose-700"><Trash2 size={12}/> Delete</button>}</div></td>
-                      </tr>)}
-                      {savedPlans.filter(draft => !teacherSubmissions.some(sub => planListIdentity(sub.plan) === planListIdentity(draft))).map((item, i) =>
-                      <tr key={`draft-${item.term}-${item.week}-${item.lessonTitle}-${i}`} className="border-b border-slate-100 align-top">
-                        <td className="whitespace-nowrap px-3 py-3 font-semibold">Term {item.term || "1"}</td>
-                        <td className="whitespace-nowrap px-3 py-3 font-semibold">Week {item.week || "1"}</td>
-                        <td className="px-3 py-3">{item.learningAreas || "—"}</td>
-                        <td className="whitespace-nowrap px-3 py-3"><span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-extrabold text-slate-700">{translate("Draft")}</span></td>
-                        <td className="px-3 py-3"><div className="flex min-w-[220px] flex-wrap items-center gap-1.5"><button type="button" onClick={() => openOrLoadPlan(item, "Draft opened.")} className="rounded-lg border border-indigo-200 px-3 py-2 text-xs font-extrabold text-indigo-700">{translate("Open Draft")}</button><button type="button" onClick={() => editSavedPlan(item)} className="inline-flex items-center gap-1 rounded-lg border border-amber-200 px-2.5 py-2 text-xs font-bold text-amber-800"><Pencil size={12}/> Edit</button><button type="button" onClick={() => deleteSavedPlan(item)} className="inline-flex items-center gap-1 rounded-lg border border-rose-200 px-2.5 py-2 text-xs font-bold text-rose-700"><Trash2 size={12}/> Delete</button></div></td>
-                      </tr>)}
-                    </tbody>
-                  </table>
-                </div>}
-          </section>
-        </div>
+            {(filteredTeacherSubmissions.length === 0 && filteredVisibleSavedPlans.length === 0) ? (
+              <div className="flex min-h-[min(60vh,520px)] flex-1 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center dark:border-slate-700 dark:bg-slate-950">
+                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 dark:bg-slate-800 dark:text-indigo-300"><BookOpen size={26}/></div>
+                <h3 className="text-base font-extrabold text-slate-800 dark:text-slate-100">{isFilipino ? "Wala pang banghay-aralin" : "No lesson plans yet"}</h3>
+                <p className="mt-1 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">{isFilipino ? "I-save ang draft o magsumite ng banghay-aralin upang makita ito rito." : "Your saved drafts and submitted lesson plans will appear here."}</p>
+                <button type="button" onClick={() => { const currentGrade = sectionGradeFilter || (selectedSections[0] ? sectionGrade(selectedSections[0]) : ""); setSelectedGradeLevel(currentGrade); setSelectedSubject(String(plan.learningAreas || selectedSubject || "")); setShowTermWeekModal(true); }} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-extrabold text-white shadow-sm transition-colors hover:bg-indigo-700"><Plus size={16}/> Create Lesson Plan</button>
+              </div>
+            ) : (
+              <div className="flex w-full min-w-0 flex-1 flex-col gap-4">
+                {submissionSubjectGroups.map(([subjectKey, subjectName]) => {
+                  const subjectColor = getSubjectColorClasses(subjectName);
+                  const subjectItems = filteredTeacherSubmissions.filter(item => getSubjectKey(item.plan.learningAreas) === subjectKey);
+                  return (
+                    <details key={`submission-subject-${subjectKey}`} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                      <summary className={`relative flex cursor-pointer list-none items-center justify-between gap-3 border-b px-5 py-4 [&::-webkit-details-marker]:hidden ${subjectColor.header} ${subjectColor.border}`}>
+                        <span className={`absolute inset-y-0 left-0 w-1 ${subjectColor.accent}`} aria-hidden="true" />
+                        <span className="flex min-w-0 items-center gap-3 pl-1">
+                          <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/75 text-sm font-black dark:bg-slate-900/70 ${subjectColor.text}`}>{subjectItems.length}</span>
+                          <span className="min-w-0"><span className={`block break-words text-sm font-extrabold ${subjectColor.text}`}>{subjectName}</span><span className="mt-0.5 block text-[11px] font-semibold text-slate-500 dark:text-slate-400">{subjectItems.length} submitted lesson plan(s)</span></span>
+                        </span>
+                        <ChevronDown size={18} className={`shrink-0 text-slate-500 transition-transform duration-200 group-open:rotate-180 ${subjectColor.text}`} />
+                      </summary>
+                      <div className="flex flex-col gap-3 p-3 sm:p-4">
+                        {subjectItems.map(item => {
+                  const subjectColor = getSubjectColorClasses(item.plan.learningAreas);
+                  const statusLabel = item.status === "approved" ? "Approved" : item.status === "returned" ? "Returned" : "Pending";
+                  const statusStyle = item.status === "approved"
+                    ? "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-900"
+                    : item.status === "returned"
+                      ? "bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:ring-rose-900"
+                      : "bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-900";
+                  const pendingDelete = changeRequests.some(request => request.submissionId === item.id && request.status === "pending");
+                  const approvedDelete = changeRequests.some(request => request.submissionId === item.id && request.teacherEmail === currentTeacherEmail && request.type === "delete" && request.status === "approved");
+                  return (
+                    <article key={`submission-${item.id}`} className="flex w-full min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-200 hover:border-indigo-200 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:hover:border-indigo-900">
+                      <div className={`relative flex items-start justify-between gap-3 border-b px-5 py-4 ${subjectColor.header} ${subjectColor.border}`}>
+                        <span className={`absolute inset-y-0 left-0 w-1 ${subjectColor.accent}`} aria-hidden="true" />
+                        <div className="min-w-0 pl-1">
+                          <p className={`text-[11px] font-extrabold uppercase tracking-[0.12em] ${subjectColor.text}`}>Submitted Lesson Plan</p>
+                          <h3 className={`mt-1 break-words text-base font-extrabold leading-snug ${subjectColor.text}`}>{item.plan.learningAreas || "Untitled Learning Area"}</h3>
+                        </div>
+                        <span className={`shrink-0 rounded-full px-3 py-1.5 text-[11px] font-extrabold ring-1 ring-inset ${statusStyle}`}>{translate(statusLabel)}</span>
+                      </div>
+                      <div className="flex flex-1 flex-col px-5 py-4">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-3 dark:border-slate-800 dark:bg-slate-950/60">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">{translate("Term")}</p>
+                            <p className="mt-1 text-sm font-extrabold text-slate-800 dark:text-slate-100">Term {item.plan.term || "1"}</p>
+                          </div>
+                          <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-3 dark:border-slate-800 dark:bg-slate-950/60">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">{translate("Week")}</p>
+                            <p className="mt-1 text-sm font-extrabold text-slate-800 dark:text-slate-100">Week {item.plan.week || "1"}</p>
+                          </div>
+                        </div>
+                        <div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
+                          <span>{(item.plan.sessions || []).length} session(s)</span>
+                          <span className="truncate">{item.teacherName || currentUser?.displayName || "Teacher submission"}</span>
+                        </div>
+                        <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
+                          <button type="button" onClick={() => openOrLoadPlan(item.plan, `${item.status === "approved" ? "Approved" : item.status === "returned" ? "Returned" : "Pending"} lesson plan opened.`)} className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-white px-3 py-2.5 text-xs font-extrabold text-indigo-700 transition-colors hover:bg-indigo-50 dark:border-indigo-900 dark:bg-slate-900 dark:text-indigo-300 dark:hover:bg-slate-800"><BookOpen size={14}/>{translate("View Plan")}</button>
+                          <button type="button" onClick={() => void shareLessonPlanAsNew(item.plan)} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-violet-200 px-3 py-2.5 text-xs font-bold text-violet-700 hover:bg-violet-50 dark:border-violet-900 dark:text-violet-300 dark:hover:bg-violet-950/30"><Share2 size={13}/> Share</button>
+                          {item.status === "approved" && (approvedDelete
+                            ? <button type="button" onClick={() => executeApprovedDeleteRequest(item)} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-300 bg-rose-600 px-3 py-2.5 text-xs font-bold text-white hover:bg-rose-700"><Trash2 size={13}/> Complete Delete</button>
+                            : <button type="button" disabled={pendingDelete} onClick={() => requestApprovedPlanChange(item, "delete")} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-200 px-3 py-2.5 text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-rose-900 dark:text-rose-300 dark:hover:bg-rose-950/30"><Trash2 size={13}/>{pendingDelete ? "Delete Requested" : "Request Delete"}</button>
+                          )}
+                          {(item.status !== "approved" || item.editApproved) && <button type="button" onClick={() => deleteSubmission(item)} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-200 px-3 py-2.5 text-xs font-bold text-rose-700 hover:bg-rose-50 dark:border-rose-900 dark:text-rose-300 dark:hover:bg-rose-950/30"><Trash2 size={13}/> Delete</button>}
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+                      </div>
+                    </details>
+                  );
+                })}
+                {incomingSharedPlans.filter(shared => getPlanSchoolYear(shared.plan) === selectedListSchoolYear).length > 0 && (
+                  <section className="mb-2 rounded-2xl border border-violet-200 bg-violet-50/50 p-4 dark:border-violet-900 dark:bg-violet-950/20">
+                    <div className="mb-3 flex items-center gap-2">
+                      <Share2 size={17} className="text-violet-700 dark:text-violet-300"/>
+                      <div>
+                        <h3 className="font-extrabold text-violet-950 dark:text-violet-100">Shared with Me — New Copies</h3>
+                        <p className="text-xs text-violet-800/80 dark:text-violet-300">Review individual session invitations. Only the selected session is added to your My Lesson Plan Submissions after you accept it.</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+                      {incomingSharedPlans.filter(shared => getPlanSchoolYear(shared.plan) === selectedListSchoolYear).map(shared => (
+                        <article key={shared.id} className="flex flex-col justify-between gap-3 rounded-xl border border-violet-200 bg-white p-4 dark:border-violet-900 dark:bg-slate-900">
+                          <div>
+                            <p className="text-[11px] font-bold uppercase tracking-wide text-violet-700 dark:text-violet-300">Shared by {shared.senderName || shared.senderEmail || "Teacher"}</p>
+                            <h4 className="mt-1 font-extrabold text-slate-900 dark:text-slate-100">{shared.plan?.learningAreas || "Untitled Learning Area"} — Term {shared.sourceTerm ?? shared.plan?.term ?? "1"}, Week {shared.sourceWeek ?? shared.plan?.week ?? "1"}</h4>
+                            <p className="mt-1 text-xs font-semibold text-violet-700 dark:text-violet-300">Session {shared.sourceSessionNumber || "1"}{shared.sourceSessionTitle ? ` — ${shared.sourceSessionTitle}` : ""}</p>
+                            <p className="mt-1 text-xs text-slate-500">Only this session is included in the invitation.</p>
+                          </div>
+                          <button type="button" onClick={() => void acceptSharedLessonPlan(shared)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-xs font-extrabold text-white hover:bg-violet-700"><CheckCircle2 size={14}/> Accept This Session</button>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                )}
+                {draftSubjectGroups.map(([subjectKey, subjectName]) => {
+                  const subjectColor = getSubjectColorClasses(subjectName);
+                  const subjectItems = filteredVisibleSavedPlans.filter(item => getSubjectKey(item.learningAreas) === subjectKey);
+                  return (
+                    <details key={`draft-subject-${subjectKey}`} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                      <summary className={`relative flex cursor-pointer list-none items-center justify-between gap-3 border-b px-5 py-4 [&::-webkit-details-marker]:hidden ${subjectColor.header} ${subjectColor.border}`}>
+                        <span className={`absolute inset-y-0 left-0 w-1 ${subjectColor.accent}`} aria-hidden="true" />
+                        <span className="flex min-w-0 items-center gap-3 pl-1">
+                          <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/75 text-sm font-black dark:bg-slate-900/70 ${subjectColor.text}`}>{subjectItems.length}</span>
+                          <span className="min-w-0"><span className={`block break-words text-sm font-extrabold ${subjectColor.text}`}>{subjectName}</span><span className="mt-0.5 block text-[11px] font-semibold text-slate-500 dark:text-slate-400">{subjectItems.length} saved draft(s)</span></span>
+                        </span>
+                        <ChevronDown size={18} className={`shrink-0 text-slate-500 transition-transform duration-200 group-open:rotate-180 ${subjectColor.text}`} />
+                      </summary>
+                      <div className="flex flex-col gap-3 p-3 sm:p-4">
+                        {subjectItems.map((item, i) => {
+                  const subjectColor = getSubjectColorClasses(item.learningAreas);
+                  return (
+                  <article key={`draft-${item.term}-${item.week}-${item.lessonTitle}-${i}`} className="flex w-full min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-200 hover:border-indigo-200 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:hover:border-indigo-900">
+                    <div className={`relative flex items-start justify-between gap-3 border-b px-5 py-4 ${subjectColor.header} ${subjectColor.border}`}>
+                      <span className={`absolute inset-y-0 left-0 w-1 ${subjectColor.accent}`} aria-hidden="true" />
+                      <div className="min-w-0 pl-1">
+                        <p className={`text-[11px] font-extrabold uppercase tracking-[0.12em] ${subjectColor.text}`}>Saved Lesson Plan</p>
+                        <h3 className={`mt-1 break-words text-base font-extrabold leading-snug ${subjectColor.text}`}>{item.learningAreas || "Untitled Learning Area"}</h3>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-[11px] font-extrabold text-slate-700 dark:bg-slate-800 dark:text-slate-200">{translate("Draft")}</span>
+                    </div>
+                    <div className="flex flex-1 flex-col px-5 py-4">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-3 dark:border-slate-800 dark:bg-slate-950/60"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">{translate("Term")}</p><p className="mt-1 text-sm font-extrabold text-slate-800 dark:text-slate-100">Term {item.term || "1"}</p></div>
+                        <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-3 dark:border-slate-800 dark:bg-slate-950/60"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">{translate("Week")}</p><p className="mt-1 text-sm font-extrabold text-slate-800 dark:text-slate-100">Week {item.week || "1"}</p></div>
+                      </div>
+                      <div className="mt-3 text-xs text-slate-500 dark:text-slate-400">{(item.sessions || []).length} session(s)</div>
+                      <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
+                        <button type="button" onClick={() => openOrLoadPlan(item, "Draft opened.")} className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-white px-3 py-2.5 text-xs font-extrabold text-indigo-700 hover:bg-indigo-50 dark:border-indigo-900 dark:bg-slate-900 dark:text-indigo-300 dark:hover:bg-slate-800"><BookOpen size={14}/>{translate("Open Draft")}</button>
+                        <button type="button" onClick={() => void shareLessonPlanAsNew(item)} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-violet-200 px-3 py-2.5 text-xs font-bold text-violet-700 hover:bg-violet-50 dark:border-violet-900 dark:text-violet-300 dark:hover:bg-violet-950/30"><Share2 size={13}/> Share</button>
+                        <button type="button" onClick={() => editSavedPlan(item)} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-amber-200 px-3 py-2.5 text-xs font-bold text-amber-800 hover:bg-amber-50 dark:border-amber-900 dark:text-amber-300 dark:hover:bg-amber-950/30"><Pencil size={13}/> Edit</button>
+                        <button type="button" onClick={() => deleteSavedPlan(item)} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-200 px-3 py-2.5 text-xs font-bold text-rose-700 hover:bg-rose-50 dark:border-rose-900 dark:text-rose-300 dark:hover:bg-rose-950/30"><Trash2 size={13}/> Delete</button>
+                      </div>
+                    </div>
+                  </article>
+                  );
+                })}
+                      </div>
+                    </details>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </section>
       </div>
     );
   }
 
   if (isSchoolHead) {
-    const pendingSubmissions = submissions.filter(item => item.status === "pending");
+    const pendingSubmissions = submissions.filter(item => item.status === "pending" &&
+      String(item.plan.schoolId || "") === String(schoolId || "") && getPlanSchoolYear(item.plan) === activeSchoolYear &&
+      (!selectedGradeLevel || getPlanGradeLevel(item.plan) === String(selectedGradeLevel).replace(/^grade\s*/i, "").toLowerCase()));
     // Show each submitted session that is actually awaiting approval as its own row.
     // Approved and returned sessions are not mixed into the pending-approval queue.
     const pendingSessionEntries = pendingSubmissions.flatMap(item => {
@@ -3166,8 +4012,7 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     // Merge pending sessions from the same lesson plan into one table row when
     // their Term, Week Number, and Learning Area match. Each session keeps its
     // own View Session action and remains individually approvable.
-    type PendingSessionEntry = typeof pendingSessionEntries[number];
-    const pendingSessionGroups: PendingSessionEntry[][] = Array.from(pendingSessionEntries.reduce((groups, entry) => {
+    const pendingSessionGroups: (typeof pendingSessionEntries)[] = Array.from(pendingSessionEntries.reduce((groups, entry) => {
       const groupKey = [
         entry.item.id,
         String(entry.item.plan.term || "").trim().toLowerCase(),
@@ -3178,7 +4023,7 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
       group.push(entry);
       groups.set(groupKey, group);
       return groups;
-    }, new Map<string, PendingSessionEntry[]>()).values());
+    }, new Map<string, typeof pendingSessionEntries>() ).values());
     const approveAllPendingSessions = async () => {
       if (pendingSessionCount === 0) {
         await showMessageWindow({ title: "No Pending Sessions", message: "There are no submitted pending sessions to approve.", mode: "info" });
@@ -3222,31 +4067,103 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
     const reviewPlan = viewingSubmission?.plan;
     const columnRow = (label: string, value: React.ReactNode) => (
       <tr key={label}>
-        <th className="w-1/4 border border-slate-300 bg-slate-100 px-3 py-2 text-left align-top text-xs font-extrabold text-slate-700">{label}</th>
-        <td className="whitespace-pre-wrap break-words border border-slate-300 px-3 py-2 align-top text-sm text-slate-800">{value || "—"}</td>
+        <th className="w-1/4 border-b border-r border-slate-200 bg-slate-50 px-3 py-3 text-left align-top text-[11px] font-extrabold uppercase tracking-wide text-slate-600 sm:px-4">{label}</th>
+        <td className="whitespace-pre-wrap break-words border-b border-slate-200 px-3 py-3 align-top text-sm leading-6 text-slate-800 sm:px-4">{value || <span className="text-slate-400">—</span>}</td>
       </tr>
     );
     return (
-      <div className="w-full min-w-0 space-y-5 text-slate-800">
+      <div className="w-full max-w-none min-w-0 space-y-5 text-slate-800">
         {messageWindow}
-        <header className="flex flex-col gap-3 rounded-2xl border border-indigo-100 bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
+        <header className="flex w-full flex-col gap-3 rounded-none border-y border-indigo-100 bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
           <div><p className="text-xs font-bold uppercase tracking-widest text-indigo-600">{isFilipino ? "Banghay-Aralin ng ILAW" : "ILAW Lesson Plan"}</p><h1 className="text-2xl font-black text-slate-900">{translate("School Head Approval")}</h1><p className="mt-1 text-sm text-slate-600">{translate("Each session is approved or returned independently. Approving one session does not approve or lock the other sessions in the same week.")}</p></div>
           <span className="inline-flex w-fit items-center rounded-full bg-amber-100 px-3 py-1.5 text-sm font-extrabold text-amber-800">{pendingSessionCount} {isFilipino ? "Sesyon na Nakabinbin" : "Pending Sessions"}</span>
         </header>
-        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-extrabold">{isFilipino ? "Mga Sesyong Naghihintay ng Pag-apruba" : "Lesson Plans for Approval — Pending Sessions"}</h2><p className="mt-1 text-xs text-slate-500">{isFilipino ? "Pinagsasama sa isang row ang mga sesyong magkapareho ang Term, Week Number, at Learning Area; maaari pa ring suriin nang magkakahiwalay ang bawat sesyon." : "Sessions with the same Term, Week Number, and Learning Area are grouped in one row; each session can still be reviewed separately."}</p></div><button type="button" onClick={approveAllPendingSessions} disabled={pendingSessionCount === 0} className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-extrabold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"><CheckCircle2 size={15}/>{isFilipino ? `Aprubahan Lahat ng Nakabinbing Sesyon (${pendingSessionCount})` : `Approve All Pending Sessions (${pendingSessionCount})`}</button></div>
-          {pendingSessionEntries.length === 0 ? <p className="p-6 text-sm text-slate-500">{isFilipino ? "Walang sesyong naghihintay ng pag-apruba." : "There are no sessions awaiting approval."}</p> :
-            <div className="w-full overflow-x-auto"><table className="w-full min-w-[980px] border-collapse text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600"><tr><th className="px-4 py-3">{translate("Term")}</th><th className="px-4 py-3">{translate("Week")}</th><th className="px-4 py-3">{translate("Learning Area")}</th><th className="px-4 py-3">{translate("Grade / Section")}</th><th className="px-4 py-3">{translate("Teacher")}</th><th className="px-4 py-3">Session</th><th className="px-4 py-3">{translate("Submitted")}</th><th className="px-4 py-3">Action</th></tr></thead><tbody className="divide-y divide-slate-100">{pendingSessionGroups.map(group => { const first = group[0]; const { item, learningArea } = first; return <tr key={`${item.id}-${item.plan.term}-${item.plan.week}-${String(learningArea).toLowerCase()}`} className={viewingSubmissionId === item.id ? "bg-indigo-50/60" : "hover:bg-slate-50"}><td className="whitespace-nowrap px-4 py-3 font-semibold">{item.plan.term || "—"}</td><td className="whitespace-nowrap px-4 py-3 font-semibold">{item.plan.week || "—"}</td><td className="px-4 py-3 font-semibold">{learningArea}</td><td className="px-4 py-3">{item.plan.gradeSection || "—"}</td><td className="px-4 py-3">{item.teacherName || "—"}<p className="text-xs text-slate-500">{item.teacherEmail}</p></td><td className="px-4 py-3"><div className="space-y-2">{group.map(({ session, index }) => <div key={`${item.id}-${session.id}`} className="rounded-lg border border-slate-200 bg-white p-2"><p className="font-bold">Session {index + 1}: {session.lessonSubtitleTitle || session.title || "Untitled session"}</p><span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-extrabold text-amber-800">{isFilipino ? "Naghihintay ng pag-apruba" : "Pending approval"}</span></div>)}</div></td><td className="whitespace-nowrap px-4 py-3">{new Date(item.submittedAt).toLocaleDateString()}</td><td className="px-4 py-3"><button type="button" onClick={() => { const firstPending = group[0]; setViewingSubmissionId(item.id); setReviewSessionIndex(firstPending.index); setReviewNote(""); setReviewCoachingNote(String(firstPending.session.coachingNotes || "")); setWorkflowMessage(""); }} className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-extrabold text-indigo-700 hover:bg-indigo-50"><BookOpen size={14}/>{isFilipino ? "Suriin ang mga Sesyon" : "Review Sessions"}</button><p className="mt-1 text-xs text-slate-500">{group.length} pending session{group.length === 1 ? "" : "s"}</p></td></tr>; })}</tbody></table></div>}
+        <section className="mx-4 w-[calc(100%-2rem)] max-w-none min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm sm:mx-6 sm:w-[calc(100%-3rem)] lg:mx-10 lg:w-[calc(100%-5rem)] xl:mx-12 xl:w-[calc(100%-6rem)]">
+          <div className="flex flex-col gap-4 border-b border-slate-100 px-6 py-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-extrabold">{isFilipino ? "Mga Sesyong Naghihintay ng Pag-apruba" : "Lesson Plans for Approval — Pending Sessions"}</h2><p className="mt-1 text-xs text-slate-500">{isFilipino ? "Pinagsasama sa isang row ang mga sesyong magkapareho ang Term, Week Number, at Learning Area; maaari pa ring suriin nang magkakahiwalay ang bawat sesyon." : "Sessions with the same Term, Week Number, and Learning Area are grouped in one row; each session can still be reviewed separately."}</p></div><button type="button" onClick={approveAllPendingSessions} disabled={pendingSessionCount === 0} className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-extrabold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"><CheckCircle2 size={15}/>{isFilipino ? `Aprubahan Lahat ng Nakabinbing Sesyon (${pendingSessionCount})` : `Approve All Pending Sessions (${pendingSessionCount})`}</button></div>
+          {pendingSessionEntries.length === 0 ? (
+            <div className="px-6 py-14 text-center">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+                <BookOpen size={24}/>
+              </div>
+              <p className="mt-4 text-sm font-semibold text-slate-700">{isFilipino ? "Walang sesyong naghihintay ng pag-apruba." : "There are no sessions awaiting approval."}</p>
+              <p className="mt-1 text-xs text-slate-500">{isFilipino ? "Lalabas dito ang mga sesyon kapag naisumite na ng guro." : "Submitted sessions from teachers will appear here."}</p>
+            </div>
+          ) : (
+            <div className="space-y-4 p-4 sm:p-6">
+              {pendingSessionGroups.map(group => {
+                const first = group[0];
+                const { item, learningArea } = first;
+                const isSelected = viewingSubmissionId === item.id;
+                return (
+                  <article
+                    key={`${item.id}-${item.plan.term}-${item.plan.week}-${String(learningArea).toLowerCase()}`}
+                    className={`overflow-hidden border ${isSelected ? "border-indigo-300 bg-indigo-50/30" : "border-slate-200 bg-white"}`}
+                  >
+                    <div className="flex flex-col gap-4 border-b border-slate-200 bg-slate-50/80 p-4 sm:p-5 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="inline-flex items-center border border-indigo-100 bg-indigo-50 px-3 py-1 text-xs font-extrabold text-indigo-700">{item.plan.term || "—"}</span>
+                          <span className="inline-flex items-center border border-slate-200 bg-white px-3 py-1 text-xs font-bold text-slate-700">Week {item.plan.week || "—"}</span>
+                          <span className="inline-flex items-center border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-extrabold text-amber-800">{group.length} {group.length === 1 ? "Pending Session" : "Pending Sessions"}</span>
+                        </div>
+                        <h3 className="mt-3 break-words text-lg font-black leading-snug text-slate-900">{learningArea || "Learning Area not specified"}</h3>
+                        <div className="mt-3 grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
+                          <div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Teacher</p><p className="mt-1 break-words text-sm font-semibold text-slate-800">{item.teacherName || "—"}</p><p className="break-all text-xs text-slate-500">{item.teacherEmail}</p></div>
+                          <div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Grade / Section</p><p className="mt-1 break-words text-sm font-semibold text-slate-800">{item.plan.gradeSection || "—"}</p></div>
+                          <div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Submitted</p><p className="mt-1 text-sm font-semibold text-slate-800">{new Date(item.submittedAt).toLocaleDateString()}</p></div>
+                          <div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Review status</p><p className="mt-1 text-sm font-semibold text-amber-700">Awaiting School Head</p></div>
+                        </div>
+                      </div>
+                      <button type="button" onClick={() => { const firstPending = group[0]; reviewModalScrollYRef.current = window.scrollY; setViewingSubmissionId(item.id); setReviewSessionIndex(firstPending.index); setReviewNote(""); setReviewCoachingNote(String(firstPending.session.coachingNotes || "")); setWorkflowMessage(""); }} className="inline-flex shrink-0 items-center justify-center gap-2 border border-indigo-200 bg-white px-5 py-3 text-sm font-extrabold text-indigo-700 hover:border-indigo-300 hover:bg-indigo-50">
+                        <BookOpen size={16}/>{isFilipino ? "Suriin ang mga Sesyon" : "Review Sessions"}
+                      </button>
+                    </div>
+                    <div className="p-4 sm:p-5">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-600">Sessions for review</h4>
+                        <span className="text-xs font-semibold text-slate-500">{group.length} {group.length === 1 ? "session" : "sessions"}</span>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
+                        {group.map(({ session, index }) => (
+                          <div key={`${item.id}-${session.id}`} className="flex min-w-0 items-start gap-3 border border-slate-200 bg-white p-4">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center bg-amber-50 text-sm font-black text-amber-700">{index + 1}</div>
+                            <div className="min-w-0 flex-1">
+                              <p className="break-words text-sm font-bold leading-snug text-slate-800">{session.lessonSubtitleTitle || session.title || `Session ${index + 1}`}</p>
+                              <span className="mt-2 inline-flex border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide text-amber-800">{isFilipino ? "Naghihintay ng pag-apruba" : "Pending approval"}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
         </section>
-        {viewingSubmission && reviewPlan && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 p-2 sm:p-5" role="dialog" aria-modal="true" aria-label="School Head lesson plan approval">
-          <section className="max-h-[94vh] w-full max-w-7xl overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl">
-          <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-indigo-600">{isFilipino ? "Kolum na Pagtingin sa Banghay-Aralin" : "Columnar Lesson Plan View"}</p><h2 className="text-xl font-black">{getLessonProperTitle(reviewPlan) || "Untitled lesson plan"}</h2><p className="mt-1 text-sm text-slate-600">Term {reviewPlan.term || "—"} · Week {reviewPlan.week || "—"} · {reviewPlan.learningAreas || "Learning area not specified"}</p></div><button type="button" onClick={() => setViewingSubmissionId(null)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700">{translate("Close View")}</button></div>
-          <div className="w-full overflow-x-auto p-3 sm:p-5"><table className="w-full min-w-[680px] table-fixed border-collapse"><tbody>
+        {viewingSubmission && reviewPlan && createPortal(<div className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-slate-950/70 p-3 backdrop-blur-sm sm:p-5 lg:p-7" style={{ position: "fixed", inset: 0, width: "100vw", height: "100dvh", minHeight: "100vh" }} role="dialog" aria-modal="true" aria-label="School Head lesson plan approval">
+          <section className="m-auto flex max-h-[min(92vh,900px)] w-full max-w-7xl flex-col overflow-x-hidden overflow-y-auto overscroll-contain rounded-2xl border border-slate-200 bg-white shadow-2xl">
+          <div className="sticky top-0 z-30 flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4 shadow-sm sm:px-7">
+            <div className="flex min-w-0 items-start gap-3">
+              <div className="mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-700"><BookOpen size={21}/></div>
+              <div className="min-w-0">
+                <p className="text-[10px] font-extrabold uppercase tracking-[.18em] text-indigo-600">{isFilipino ? "Pagsusuri ng Banghay-Aralin" : "LESSON PLAN REVIEW"}</p>
+                <h2 className="mt-1 truncate text-lg font-black tracking-tight text-slate-900 sm:text-2xl">{getLessonProperTitle(reviewPlan) || "Untitled lesson plan"}</h2>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1">Term {reviewPlan.term || "—"}</span>
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1">Week {reviewPlan.week || "—"}</span>
+                  <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-indigo-700">{reviewPlan.learningAreas || "Learning area not specified"}</span>
+                </div>
+              </div>
+            </div>
+            <button type="button" onClick={() => setViewingSubmissionId(null)} aria-label={translate("Close View")} className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"><X size={16}/><span className="hidden sm:inline">{translate("Close View")}</span></button>
+          </div>
+          <div className="bg-slate-50/70 px-3 py-4 sm:px-6 sm:py-5"><table className="w-full min-w-[680px] table-fixed border-separate border-spacing-0 overflow-hidden rounded-xl bg-white shadow-sm"><colgroup><col style={{width:"27%"}}/><col style={{width:"73%"}}/></colgroup><tbody>
             {columnRow("Term", `Term ${reviewPlan.term || "—"}`)}{columnRow("Week Number", `Week ${reviewPlan.week || "—"}`)}{columnRow("Lesson Title", getLessonProperTitle(reviewPlan))}{columnRow("Learning Area/s", reviewPlan.learningAreas)}{columnRow("Grade Level and Section", reviewPlan.gradeSection)}{columnRow("Date of Instruction", formatSessionInstructionDates(reviewPlan) || "—")}{columnRow("Name of Teacher/s", reviewPlan.teacherNames || viewingSubmission.teacherName)}{columnRow("School Head / Principal", reviewPlan.schoolHeadName)}
             <tr><th colSpan={2} className="border border-indigo-200 bg-indigo-50 px-3 py-2 text-left text-sm font-extrabold text-indigo-900">Intention — Lesson Overview</th></tr>
             {columnRow("Learning Competency and Curriculum Standards", reviewPlan.competencyStandards)}{columnRow("Learner Context", reviewPlan.learnerContext)}{columnRow("AI Use Declaration", reviewPlan.aiDeclaration)}
             <tr><th colSpan={2} className="border border-emerald-200 bg-emerald-50 px-3 py-2 text-left text-sm font-extrabold text-emerald-900">Learning Experiences — Resources and Integration</th></tr>
-            {columnRow("Learning Resources", reviewPlan.learningResources)}{columnRow("Opportunities for Integration", reviewPlan.integration)}
+            {columnRow("Opportunities for Integration", reviewPlan.integration)}
             <tr><th colSpan={2} className="border border-indigo-200 bg-indigo-50 px-3 py-2 text-left text-sm font-extrabold text-indigo-900">Session to Review — Full Session Content</th></tr>
             {(() => {
               const sessions = reviewPlan.sessions || [];
@@ -3262,32 +4179,33 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
               return sessionEntries.length > 0 ? <>
                 <tr><th className="w-1/4 border border-slate-300 bg-slate-100 px-3 py-2 text-left align-top text-xs font-extrabold text-slate-700">Select Session</th><td className="border border-slate-300 px-3 py-2">
                   <div className="mt-2 flex flex-wrap gap-2">{sessionEntries.map(({ session, index, isApproved, isSubmitted }) => <button key={session.id || index} type="button" disabled={!isSubmitted} onClick={() => { setReviewSessionIndex(index); setReviewCoachingNote(String(reviewPlan.sessions?.[index]?.coachingNotes || "")); }} className={`rounded-full px-3 py-1 text-xs font-extrabold disabled:cursor-not-allowed disabled:opacity-60 ${isApproved ? "bg-emerald-100 text-emerald-800" : isSubmitted ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-500"}`}>Session {index + 1}: {isApproved ? "Approved" : isSubmitted ? (viewingSubmission.sessionStatuses?.[session.id] === "returned" ? "Returned" : "Pending") : "Not submitted"}</button>)}</div></td></tr>
-                {(() => { const session = selectedEntry.session; const index = selectedEntry.index; const isApproved = selectedEntry.isApproved; return <><tr><th colSpan={2} className={`border px-3 py-2 text-left text-sm font-extrabold ${isApproved ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>Session {index + 1} Status: {isApproved ? "Approved" : "Pending Approval"}{viewingSubmission.sessionReviewNotes?.[session.id] ? ` — Remarks: ${viewingSubmission.sessionReviewNotes[session.id]}` : ""}</th></tr>{!session.hideLessonSubtitleTitle && columnRow(`Session ${index + 1} — Lesson Subtitle Title`, session.lessonSubtitleTitle)}{columnRow(`Session ${index + 1} — Session Focus / Duration`, session.title)}{columnRow(`Session ${index + 1} — Learning Objectives`, session.objectives)}{columnRow(`Session ${index + 1} — Pre-Lesson`, session.preLesson)}{columnRow(`Session ${index + 1} — Learning Activities / Flow`, <div className="whitespace-pre-wrap break-words" dangerouslySetInnerHTML={{ __html: /<[a-z][\s\S]*>/i.test(session.flow || "") ? assessmentHtml(session.flow || "") : flowMarkdownToHtml(session.flow || "") }} />)}{columnRow(`Session ${index + 1} — Formative Assessment`, <div className="ilaw-assessment-content" dangerouslySetInnerHTML={{ __html: assessmentHtml(session.assessment || reviewPlan.formativeAssessment || "") }} />)}{columnRow(`Session ${index + 1} — Assessment Materials (04. ASSESSMENT)`, (session.assessmentAttachments || []).length ? <div className="space-y-2">{(session.assessmentAttachments || []).map(attachment => <div key={attachment.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-3"><div className="min-w-0"><p className="break-all font-semibold text-slate-800">{attachment.name}</p><p className="text-xs text-slate-500">{attachment.included === false ? "Not included by teacher" : "Included in assessment"} · {attachment.type?.includes("pdf") || attachment.name.toLowerCase().endsWith(".pdf") ? "PDF" : "Word document"}</p></div><button type="button" disabled={materialsLoading} onClick={() => void previewAssessmentAttachment(attachment, viewingSubmission.teacherEmail || viewingSubmission.teacherName || materialsOwner)} className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-extrabold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"><BookOpen size={14}/>{isFilipino ? "I-preview ang File" : "Preview File"}</button></div>)}</div> : <span className="text-sm text-slate-500">No assessment files uploaded for this session.</span>)}{columnRow(`Session ${index + 1} — Extended Learning`, session.extendedLearning || reviewPlan.extendedLearning)}{columnRow(`Session ${index + 1} — Reflection`, session.reflection || reviewPlan.reflections)}{columnRow(`Session ${index + 1} — Ways Forward`, session.waysForward)}{columnRow(`Session ${index + 1} — Instructional Coaching Notes`, session.coachingNotes)}</>; })()}
+                {(() => { const session = selectedEntry.session; const index = selectedEntry.index; const isApproved = selectedEntry.isApproved; return <><tr><th colSpan={2} className={`border px-3 py-2 text-left text-sm font-extrabold ${isApproved ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>Session {index + 1} Status: {isApproved ? "Approved" : "Pending Approval"}{viewingSubmission.sessionReviewNotes?.[session.id] ? ` — Remarks: ${viewingSubmission.sessionReviewNotes[session.id]}` : ""}</th></tr>{!session.hideLessonSubtitleTitle && columnRow(`Session ${index + 1} — Lesson Subtitle Title`, session.lessonSubtitleTitle)}{columnRow(`Session ${index + 1} — Session Focus / Duration`, session.title)}{columnRow(`Session ${index + 1} — Learning Resources`, session.learningResources)}{columnRow(`Session ${index + 1} — Learning Objectives`, session.objectives)}{columnRow(`Session ${index + 1} — Pre-Lesson`, session.preLesson)}{columnRow(`Session ${index + 1} — Learning Activities / Flow`, <div className="whitespace-pre-wrap break-words" dangerouslySetInnerHTML={{ __html: /<[a-z][\s\S]*>/i.test(session.flow || "") ? assessmentHtml(session.flow || "") : flowMarkdownToHtml(session.flow || "") }} />)}{columnRow(`Session ${index + 1} — Formative Assessment`, <div className="ilaw-assessment-content" dangerouslySetInnerHTML={{ __html: assessmentHtml(session.assessment || reviewPlan.formativeAssessment || "") }} />)}{columnRow(`Session ${index + 1} — Assessment Materials (04. ASSESSMENT)`, (session.assessmentAttachments || []).length ? <div className="space-y-2">{(session.assessmentAttachments || []).map(attachment => <div key={attachment.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-3"><div className="min-w-0"><p className="break-all font-semibold text-slate-800">{attachment.name}</p><p className="text-xs text-slate-500">{attachment.included === false ? "Not included by teacher" : "Included in assessment"} · {attachment.type?.includes("pdf") || attachment.name.toLowerCase().endsWith(".pdf") ? "PDF" : "Word document"}</p></div><button type="button" disabled={materialsLoading} onClick={() => void previewAssessmentAttachment(attachment, viewingSubmission.teacherEmail || viewingSubmission.teacherName || materialsOwner)} className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-extrabold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"><BookOpen size={14}/>{isFilipino ? "I-preview ang File" : "Preview File"}</button></div>)}</div> : <span className="text-sm text-slate-500">No assessment files uploaded for this session.</span>)}{columnRow(`Session ${index + 1} — Extended Learning`, session.extendedLearning || reviewPlan.extendedLearning)}{columnRow(`Session ${index + 1} — Reflection`, session.reflection || reviewPlan.reflections)}{columnRow(`Session ${index + 1} — Ways Forward`, session.waysForward)}{columnRow(`Session ${index + 1} — Instructional Coaching Notes`, session.coachingNotes)}</>; })()}
               </> : <tr><td colSpan={2} className="border border-slate-300 bg-slate-50 px-3 py-4 text-sm font-semibold text-slate-600">No sessions found in this lesson plan.</td></tr>;
             })()}
             {columnRow("References", reviewPlan.references)}
           </tbody></table></div>
-          <div className="space-y-4 border-t border-slate-200 bg-slate-50 p-4 sm:p-5">
-            <h3 className="font-extrabold text-slate-900">{isFilipino ? "Pag-apruba" : "Approval"}</h3>
+          <div className="shrink-0 space-y-4 border-t border-slate-200 bg-white px-4 py-4 sm:px-6 sm:py-5">
+            <div className="flex items-center gap-2"><div className="h-5 w-1 rounded-full bg-indigo-600"/><h3 className="font-extrabold text-slate-900">{isFilipino ? "Pag-apruba" : "Approval"}</h3></div>
             {(() => { const selectedSession = (reviewPlan.sessions || [])[reviewSessionIndex]; return selectedSession ? <div className="rounded-xl border border-indigo-200 bg-white p-4"><label className="block text-sm font-extrabold text-indigo-900">Instructional Coaching Notes — Session {reviewSessionIndex + 1}<span className="mt-1 block text-xs font-normal text-slate-600">These notes are written by the School Head and shared with the teacher in Section 06 — Rubric / Peer Coaching.</span><textarea value={reviewCoachingNote} onChange={e => setReviewCoachingNote(e.target.value)} rows={5} placeholder="Provide actionable coaching feedback, identify strengths and support needs, and agree on next steps." className="mt-3 w-full rounded-xl border border-indigo-200 bg-white p-3 text-sm font-normal focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"/></label><button type="button" onClick={() => saveReviewCoachingNotes(viewingSubmission, selectedSession.id, reviewCoachingNote)} className="mt-3 inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-extrabold text-white hover:bg-indigo-700"><Save size={15}/> Save Coaching Notes for Teacher</button></div> : null; })()}
             <label className="block text-sm font-bold text-slate-700">{isFilipino ? "Mga puna para sa sesyong ito (opsyonal)" : "Remarks for this session (optional)"}<textarea value={reviewNote} onChange={e => setReviewNote(e.target.value)} rows={3} placeholder="Add approval or revision remarks for this session" className="mt-2 w-full rounded-xl border border-slate-200 bg-white p-3 text-sm font-normal"/></label>
             {workflowMessage && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{workflowMessage}</p>}
             {(() => { const sessions = (reviewPlan.sessions || []).map((session, index) => { const state = viewingSubmission.sessionStatuses?.[session.id]; const isApproved = (viewingSubmission.approvedSessionIds || []).includes(session.id) || state === "approved"; const submittedIds = viewingSubmission.submittedSessionIds; const isSubmitted = submittedIds ? submittedIds.includes(session.id) : (state === "pending" || state === "returned" || (viewingSubmission.status === "pending" && !isApproved)); return { session, index, isApproved, isSubmitted }; }); const selectedEntry = sessions.find(entry => entry.index === reviewSessionIndex && entry.isSubmitted && !entry.isApproved) || sessions.find(entry => entry.isSubmitted && !entry.isApproved) || sessions.find(entry => entry.isSubmitted) || sessions[0]; const currentSession = selectedEntry?.session; const sessionNumber = selectedEntry ? selectedEntry.index + 1 : 0; const hasSessionSubmission = !!currentSession && !!selectedEntry?.isSubmitted && [currentSession.title, currentSession.preLesson, currentSession.flow, currentSession.assessment, currentSession.extendedLearning, currentSession.reflection, currentSession.waysForward, currentSession.coachingNotes].some(value => String(value || "").replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").trim().length > 0); return currentSession && selectedEntry?.isApproved ? <p className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">Session {sessionNumber} has already been approved. Select another submitted session to review it.</p> : currentSession && !selectedEntry?.isSubmitted ? <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-600">Session {sessionNumber} has not been submitted by the teacher. It cannot be approved yet.</p> : currentSession && hasSessionSubmission ? <><div className="flex flex-wrap gap-2"><button type="button" onClick={() => reviewSubmission(viewingSubmission, "approved", currentSession.id)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-extrabold text-white hover:bg-emerald-700"><CheckCircle2 size={17}/> Approve Session {sessionNumber}</button><button type="button" onClick={() => reviewSubmission(viewingSubmission, "returned", currentSession.id)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-rose-600 px-5 py-3 text-sm font-extrabold text-white hover:bg-rose-700"><RotateCcw size={16}/> Return This Session</button></div></> : currentSession ? <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">Session {sessionNumber} has no submitted content. It cannot be approved until the teacher submits this session.</p> : <p className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">There are no sessions to review.</p>; })()}
           </div>
           </section>
-        </div>}
+        </div>, document.body)}
         {assessmentPreview && <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-3 sm:p-6" role="dialog" aria-modal="true" aria-label="Assessment attachment preview"><section className="flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"><header className="flex items-center justify-between gap-3 border-b border-slate-200 p-4"><div className="min-w-0"><h2 className="font-extrabold text-slate-900">Assessment File Preview</h2><p className="break-all text-sm text-slate-600">{assessmentPreview.name}</p></div><button type="button" onClick={closeAssessmentPreview} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50">Close</button></header><div className="min-h-[60vh] flex-1 overflow-auto bg-slate-100 p-3">{assessmentPreview.type.includes("pdf") || assessmentPreview.name.toLowerCase().endsWith(".pdf") ? <iframe title={assessmentPreview.name} src={assessmentPreview.url} className="h-[70vh] w-full rounded-lg border border-slate-300 bg-white" /> : <div className="mx-auto max-w-xl rounded-xl border border-slate-200 bg-white p-6 text-center"><p className="font-bold text-slate-800">Word document ready to open or download</p><p className="mt-2 text-sm text-slate-600">Your browser may not display Word files directly. Download the file to review its contents.</p><a href={assessmentPreview.url} download={assessmentPreview.name} className="mt-4 inline-flex rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white">Download Word File</a></div>}</div></section></div>}
       </div>
     );
   }
 
+
   return (
-    <div className="ilaw-print-document m-0 p-0 w-full min-w-0 max-w-none space-y-3 text-slate-800">
+    <div className="ilaw-print-document relative mx-auto w-full min-w-0 max-w-none space-y-6 px-4 text-slate-800 sm:px-6 lg:px-10 xl:px-12" style={{ marginTop: 0, marginBottom: 0, position: "relative", top: 0, width: "100%", maxWidth: "100%", boxSizing: "border-box" }}>
       {messageWindow}
       {/* ILAW workspace header stays below the Institutional Header and does not cover its profile menu. */}
       <div
-        className="no-print relative z-0 box-border m-0 w-screen min-w-0 max-w-none border-b border-slate-200 bg-white p-0 shadow-sm dark:border-slate-800 dark:bg-slate-900"
-        style={{ width: "100vw", maxWidth: "100vw", marginLeft: "calc(50% - 50vw)", backgroundColor: "var(--ilaw-header-background, #ffffff)" }}
+        className="no-print sticky top-0 z-[999] box-border -mx-4 w-[calc(100%+2rem)] min-w-0 max-w-none border-b border-slate-200 bg-white shadow-md dark:border-slate-800 dark:bg-slate-900 sm:-mx-6 sm:w-[calc(100%+3rem)] lg:-mx-10 lg:w-[calc(100%+5rem)] xl:-mx-12 xl:w-[calc(100%+6rem)]"
+        style={{ backgroundColor: "var(--ilaw-header-background, #ffffff)", position: "sticky", top: 0, zIndex: 999 }}
       >
         {/* Header of ILAW Lesson Plan */}
         <header className="w-full min-w-0 max-w-none border-b border-slate-100 dark:border-slate-800/80">
@@ -3364,10 +4282,9 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
             </div>
           </div>
         </header>
-      </div>
 
-      {/* Section navigation stays in normal document flow and scrolls with the page. */}
-      <nav aria-label={isFilipino ? "Navigasyon sa mga bahagi ng banghay-aralin" : "Lesson plan section navigation"} className="no-print flex w-screen max-w-none flex-wrap items-center gap-2 border-b border-slate-200 px-4 py-2 shadow-sm sm:px-6 bg-slate-50 dark:bg-slate-900 dark:border-slate-700" style={{ width: "100vw", maxWidth: "100vw", marginLeft: "calc(50% - 50vw)" }}>
+        {/* Keep the Jump To navigation attached to the ILAW header while scrolling. */}
+        <nav aria-label={isFilipino ? "Navigasyon sa mga bahagi ng banghay-aralin" : "Lesson plan section navigation"} className="no-print flex w-full max-w-none flex-wrap items-center gap-2 border-b border-slate-200 px-2 py-3 shadow-sm sm:px-3 lg:px-4 bg-slate-50 dark:bg-slate-900 dark:border-slate-700" style={{ width: "100%", maxWidth: "100%", marginLeft: 0 }}>
           <span className="mr-1 text-xs font-extrabold uppercase tracking-wide text-slate-500">{isFilipino ? "Pumunta sa:" : "Jump to:"}</span>
           {[
             { number: "01", label: isFilipino ? "Impormasyon ng Aralin" : "Lesson Information" },
@@ -3381,8 +4298,7 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
               type="button"
               onClick={() => {
                 if (item.number === "03" && !lessonInformationComplete) return;
-                // Approval navigation is always available. Only individually saved
-                // sessions are shown inside the Approval section.
+                if (item.number === "07") setWorkflowMessage("");
                 setActiveNavigationSection(item.number);
                 window.scrollTo({ top: 0, behavior: "smooth" });
               }}
@@ -3398,8 +4314,10 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
               {item.label}
             </button>
           ))}
-      </nav>
-      {/* No spacer is needed because the section navigation is not sticky. */}
+        </nav>
+      </div>
+
+      {/* No extra spacer is needed because the header and Jump To bar stick together. */}
       <div className="no-print h-[0rem] sm:h-[0rem] md:h-[0rem]" aria-hidden="false" />
 
       {approvedEditMode && <div role="status" className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm font-semibold text-indigo-900">System Admin authorized editing for this approved lesson plan. All lesson fields and formatting controls are enabled. Use <strong>{translate("Save Changes")}</strong> to update the existing approved submission; no reapproval is required.</div>}
@@ -3470,7 +4388,7 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
         </div>
         <div className="md:col-span-2 mt-2 flex flex-col items-end gap-2 border-t border-sky-100 pt-4">
           {!lessonInformationComplete && <p className="w-full text-xs text-amber-700">{translate("Complete Learning Area/s, Name of Teacher/s, Grade Level and Section, Number of Sessions, References, and Declaration of AI use to proceed.")}</p>}
-          <button type="button" disabled={!lessonInformationComplete} onClick={async () => { const saved = await savePlan(plan); if (saved) { setActiveNavigationSection("03"); window.scrollTo({ top: 0, behavior: "smooth" }); } }} className="inline-flex items-center gap-2 rounded-xl bg-indigo-700 px-5 py-2.5 text-sm font-extrabold text-white shadow-sm hover:bg-indigo-800 disabled:cursor-not-allowed disabled:bg-slate-300">{translate("Proceed to ILAW Lesson Plan")} <ArrowRight size={16}/></button>
+          <button type="button" disabled={!lessonInformationComplete} onClick={async () => { const saved = await savePlan(plan, false); if (saved) { setActiveNavigationSection("03"); window.scrollTo({ top: 0, behavior: "smooth" }); } }} className="inline-flex items-center gap-2 rounded-xl bg-indigo-700 px-5 py-2.5 text-sm font-extrabold text-white shadow-sm hover:bg-indigo-800 disabled:cursor-not-allowed disabled:bg-slate-300">{translate("Proceed to ILAW Lesson Plan")} <ArrowRight size={16}/></button>
         </div>
       </div>)}
 
@@ -3486,47 +4404,68 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
 
       {section("03", "Lesson Proper", "Plan the pre-lesson activities, lesson flow, assessment, and ways forward for each session.", <>
         <div className="space-y-4">
-          {/* Section 03 Session Tabs: always keep single session selected */}
-          <div className="-mx-1 flex flex-wrap gap-2 border-b border-slate-200 bg-white px-1 py-2 shadow-md" role="tablist" aria-label={isFilipino ? "Mga tab ng sesyon sa paglinang ng aralin" : "Lesson Proper session tabs"}>
-            {plan.sessions.map((s, i) => {
-              const allowed = canOpenSessionTab(i);
-              const active = activeSessionTab === s.id;
-              return (
-                <div key={s.id} className="inline-flex items-center gap-1.5">
-                <button
-                  key={s.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  disabled={!allowed}
-                  onClick={() => {
-                    if (allowed) {
+          {/* Per-session navigator: intentionally visually distinct from the main ILAW section navigation. */}
+          <div className="no-print sticky top-[170px] z-[80] rounded-2xl border border-teal-200 bg-gradient-to-r from-teal-50 via-white to-cyan-50 p-3 shadow-lg dark:border-teal-900 dark:from-slate-900 dark:via-slate-900 dark:to-slate-800 sm:top-[130px]">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-teal-700 dark:text-teal-300">{isFilipino ? "Tagapili ng Sesyon" : "SESSION NAVIGATOR"}</p>
+                <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-300">{isFilipino ? "Pumili ng sesyon na iyong ie-edit." : "Choose an individual session to work on."}</p>
+              </div>
+              <span className="rounded-full bg-teal-100 px-2.5 py-1 text-[10px] font-extrabold text-teal-800 dark:bg-teal-950 dark:text-teal-200">{currentSessionIndex + 1} / {plan.sessions.length}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5" role="tablist" aria-label={isFilipino ? "Mga sesyon sa Lesson Proper" : "Individual lesson sessions"}>
+              {plan.sessions.map((s, i) => {
+                const active = activeSessionTab === s.id;
+                const hasReflection = !!s.reflection?.trim();
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => {
                       setActiveSessionTab(s.id);
                       setWorkflowMessage("");
-                    }
-                  }}
-                  className={`rounded-xl border px-4 py-2 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                    active
-                      ? "border-emerald-600 bg-emerald-600 text-white shadow-sm"
-                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                  }`}
-                >
-                  Session {i + 1}{s.reflection?.trim() ? " ✓" : ""}
-                </button>
-                {/* {i === plan.sessions.length - 1 && <button type="button" onClick={() => { setActiveSessionTab(s.id); setWorkflowMessage(""); window.setTimeout(() => document.getElementById(`ilaw-session-reflection-${s.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 150); }} className={`rounded-xl border px-3 py-2 text-xs font-bold ${s.reflection?.trim() ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100" : "border-violet-200 bg-violet-50 text-violet-800 hover:bg-violet-100"}`} title={`Go to Reflection for Last Session`}>{translate("Reflection")}</button>} */}
-                </div>
-              );
-            })}
+                    }}
+                    className={`group flex min-h-[66px] items-center gap-2 rounded-xl border px-3 py-2 text-left transition-all focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2 ${
+                      active
+                        ? "border-teal-700 bg-teal-700 text-white shadow-md ring-2 ring-teal-200 dark:border-teal-400 dark:bg-teal-700"
+                        : hasReflection
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-900 hover:border-emerald-400 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-200"
+                          : "border-slate-200 bg-white text-slate-700 hover:border-teal-300 hover:bg-teal-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                    }`}
+                  >
+                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-xs font-black ${active ? "bg-white/15 text-white" : hasReflection ? "bg-emerald-200 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200" : "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-200"}`}>{String(i + 1).padStart(2, "0")}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-xs font-extrabold">{isFilipino ? "Sesyon" : "Session"} {i + 1}</span>
+                      <span className={`mt-0.5 block text-[10px] font-semibold ${active ? "text-teal-50" : hasReflection ? "text-emerald-700 dark:text-emerald-300" : "text-slate-500 dark:text-slate-400"}`}>{hasReflection ? (isFilipino ? "May Pagninilay ✓" : "Reflection complete ✓") : (isFilipino ? "Pagninilay pending" : "Reflection pending")}</span>
+                    </span>
+                    {hasReflection && <span aria-label="Reflection complete" className={`text-sm font-black ${active ? "text-white" : "text-emerald-600 dark:text-emerald-300"}`}>✓</span>}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-2" role="tablist" aria-label="Lesson Proper categories">
+          <div className="rounded-2xl border-2 border-indigo-200 bg-white shadow-md dark:border-indigo-900 dark:bg-slate-900">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-indigo-100 bg-gradient-to-r from-indigo-50 via-white to-violet-50 px-4 py-3 dark:border-indigo-900 dark:from-indigo-950/60 dark:via-slate-900 dark:to-violet-950/40">
+              <div className="min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-300">{isFilipino ? "Nilalaman ng Sesyon" : "INDIVIDUAL SESSION WORKSPACE"}</p>
+                <h3 className="mt-0.5 truncate text-base font-extrabold text-indigo-950 dark:text-indigo-100">{isFilipino ? `Sesyon ${currentSessionIndex + 1}` : `Session ${currentSessionIndex + 1}`}{plan.sessions[currentSessionIndex]?.lessonSubtitleTitle ? ` — ${plan.sessions[currentSessionIndex].lessonSubtitleTitle}` : plan.sessions[currentSessionIndex]?.title ? ` — ${plan.sessions[currentSessionIndex].title}` : ""}</h3>
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{isFilipino ? "Ang mga bahagi sa ibaba ay para lamang sa napiling sesyon." : "All lesson-planning fields below belong to this selected session."}</p>
+              </div>
+              <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-extrabold ${plan.sessions[currentSessionIndex]?.reflection?.trim() ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200" : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200"}`}>{plan.sessions[currentSessionIndex]?.reflection?.trim() ? (isFilipino ? "Pagninilay kumpleto" : "Reflection complete") : (isFilipino ? "Pagninilay pending" : "Reflection pending")}</span>
+            </div>
+            <div className="space-y-4 p-4">
+          {/* Lesson Proper category tabs scroll normally; only the ILAW header, JUMP TO, and SESSION NAVIGATOR remain sticky. */}
+          <div className="-mx-1 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-900" role="tablist" aria-label="Lesson Proper categories">
             {[
               { label: isFilipino ? "Intensiyon" : "Intentions", target: "ilaw-intentions-tab" },
               { label: isFilipino ? "Karanasan sa Pagkatuto" : "Learning Experience", target: "ilaw-learning-experience-tab" },
               { label: isFilipino ? "Pagtataya" : "Assessment", target: "ilaw-assessment-tab" },
               { label: isFilipino ? "Mga Susunod na Hakbang" : "Ways Forward", target: "ilaw-ways-forward-tab" },
             ].map(tab => <button key={tab.target} type="button" role="tab" aria-selected={activeLessonProperTab === tab.label} onClick={() => setActiveLessonProperTab(tab.label)} className={`rounded-lg border px-3 py-2 text-sm font-bold transition ${activeLessonProperTab === tab.label ? "border-indigo-600 bg-indigo-600 text-white" : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-indigo-50"}`}>{tab.label}</button>)}
-            <button type="button" onClick={() => { const parts = isFilipino ? ["Intensiyon", "Karanasan sa Pagkatuto", "Pagtataya", "Mga Susunod na Hakbang"] : ["Intentions", "Learning Experience", "Assessment", "Ways Forward"]; const current = parts.findIndex(part => part === activeLessonProperTab); if (current < parts.length - 1) setActiveLessonProperTab(parts[current + 1]); }} disabled={(isFilipino ? ["Intensiyon", "Karanasan sa Pagkatuto", "Pagtataya", "Mga Susunod na Hakbang"] : ["Intentions", "Learning Experience", "Assessment", "Ways Forward"]).indexOf(activeLessonProperTab) === 3} className="ml-auto inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-extrabold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40">{isFilipino ? "Susunod na Bahagi" : "Next Part"} <span aria-hidden="true">→</span></button>
+            <button type="button" onClick={() => void savePlan()} disabled={approvedEditMode && !approvedEditSubmissionId} title={approvedEditMode ? "Save approved-plan edits to the existing submission" : `Save the lesson plan from Session ${currentSessionIndex + 1}`} className="no-print ml-auto inline-flex items-center gap-2 rounded-lg border border-emerald-700 bg-emerald-600 px-4 py-2 text-sm font-extrabold text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:border-slate-300"><Save size={16}/> {approvedEditMode ? "Save Changes" : `Save Session ${currentSessionIndex + 1}`}</button>
           </div>
               <div className="mb-3 grid gap-3 rounded-lg border border-teal-200 bg-teal-50/60 p-3 sm:grid-cols-2">
                 <label className="block"><span className="mb-1.5 block text-xs font-bold text-teal-900">{isFilipino ? `Petsa ng Pagsasagawa — Sesyon ${currentSessionIndex + 1}` : `Date of Instruction — Session ${currentSessionIndex + 1}`}</span><input type="date" disabled={controlsLocked} value={plan.sessions[currentSessionIndex]?.dateOfInstruction || ""} onChange={e => updateSession(plan.sessions[currentSessionIndex]?.id || "session-1", "dateOfInstruction", e.target.value)} className="w-full rounded-lg border border-teal-200 bg-white px-3 py-2 text-sm disabled:bg-slate-100"/><span className="mt-1 block text-[11px] text-slate-500">{isFilipino ? "Itakda ang petsa para sa sesyong ito lamang." : "Set the instruction date for this session only."}</span></label>
@@ -3733,32 +4672,55 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
             </div>
             <div className={(activeLessonProperTab === "Karanasan sa Pagkatuto" || activeLessonProperTab === "Learning Experience") ? "mt-6 rounded-xl border border-emerald-200 bg-emerald-50/50 p-4" : "hidden"}>
           <div className="mb-3 border-b border-emerald-200 pb-2"><h4 className="text-sm font-extrabold uppercase tracking-wide text-emerald-800">{isFilipino ? "Kagamitang Pampagkatuto at mga Pagkakataon para sa Integrasyon" : "Learning Resources and Opportunities for Integration"}</h4><p className="mt-1 text-xs text-slate-600">{isFilipino ? "Ilagay dito ang mga kagamitang gagamitin at mga ugnayan sa ibang asignatura o paksa." : "Enter the materials learners will use and meaningful links to other learning areas or topics."}</p></div>
-          {field("Learning Resources", "learningResources", "List available, inclusive materials and alternatives for emergencies or limited connectivity.", 3)}
+          <label className="mb-3 block"><span className="mb-1 block text-xs font-bold text-slate-700">{isFilipino ? "Kagamitang Pampagkatuto — Sesyon" : "Learning Resources — Session"} {currentSessionIndex + 1}</span><textarea disabled={controlsLocked} rows={3} value={plan.sessions[currentSessionIndex].learningResources || ""} onChange={e => updateSession(plan.sessions[currentSessionIndex].id, "learningResources", e.target.value)} placeholder={translate("List available, inclusive materials and alternatives for emergencies or limited connectivity.")} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label>
           {field("Opportunities for integration", "integration", "Meaningful links to another learning area, special topic, or technology; write N/A if none.", 3)}
         </div>
             <div id="ilaw-ways-forward-tab" className={(activeLessonProperTab === "Mga Susunod na Hakbang" || activeLessonProperTab === "Ways Forward") ? "mt-5 rounded-xl border border-amber-200 bg-amber-50/50 p-4" : "hidden"}>
               <h5 className="mb-3 text-sm font-extrabold uppercase tracking-wide text-amber-900">{isFilipino ? `Mga Susunod na Hakbang — Sesyon ${currentSessionIndex + 1}` : `Ways Forward — Session ${currentSessionIndex + 1}`}</h5>
               <label className="mb-3 block"><span className="mb-1 block text-xs font-bold text-slate-700">{isFilipino ? "Mga Susunod na Hakbang" : "Ways Forward / Next Steps"}</span><textarea disabled={controlsLocked} rows={4} value={plan.sessions[currentSessionIndex].waysForward || ""} onChange={e => updateSession(plan.sessions[currentSessionIndex].id, "waysForward", e.target.value)} placeholder={translate("Plan reteaching, enrichment, learner support, referrals, or adjustments based on the assessment.")} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label>
               <label className="mb-3 block"><span className="mb-1 block text-xs font-bold text-slate-700">{isFilipino ? "Mga Pagkakataon para sa Pinalawak na Pagkatuto" : "Extended Learning Opportunities"}</span><textarea disabled={controlsLocked} rows={3} value={plan.sessions[currentSessionIndex].extendedLearning || ""} onChange={e => updateSession(plan.sessions[currentSessionIndex].id, "extendedLearning", e.target.value)} placeholder={translate("Practice, enrichment, or support beyond this session.")} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label>
-              <label className="block"><span className="mb-1 block text-xs font-bold text-violet-800">{isFilipino ? "Pagninilay (kinakailangan upang magpatuloy)" : "Reflection (required to proceed)"}</span><textarea id={`ilaw-session-reflection-${plan.sessions[currentSessionIndex].id}`} disabled={controlsLocked} rows={3} value={plan.sessions[currentSessionIndex].reflection || ""} onChange={e => { updateSession(plan.sessions[currentSessionIndex].id, "reflection", e.target.value); setWorkflowMessage(""); }} placeholder={translate("What did learners understand? What needs reteaching or adjusting?")} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label>
+              <label className="block"><span className="mb-1 block text-xs font-bold text-violet-800">{isFilipino ? "Pagninilay" : "Reflection"}</span><textarea id={`ilaw-session-reflection-${plan.sessions[currentSessionIndex].id}`} disabled={controlsLocked} rows={3} value={plan.sessions[currentSessionIndex].reflection || ""} onChange={e => { updateSession(plan.sessions[currentSessionIndex].id, "reflection", e.target.value); setWorkflowMessage(""); }} placeholder={translate("What did learners understand? What needs reteaching or adjusting?")} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label>
             </div>
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-white p-3">
-              <div>
-                <p className="text-sm font-extrabold text-emerald-900">{isFilipino ? `I-save ang Sesyon ${currentSessionIndex + 1}` : `Save Session ${currentSessionIndex + 1}`}</p>
-                <p className="mt-0.5 text-xs text-slate-500">{isFilipino ? "Sine-save ang buong banghay-aralin kasama ang lahat ng sesyon." : "Saves the complete lesson plan, including all sessions and this session's latest entries."}</p>
+            <div className="mt-4 flex justify-end">
+              <div className="no-print inline-flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const parts = isFilipino
+                      ? ["Intensiyon", "Karanasan sa Pagkatuto", "Pagtataya", "Mga Susunod na Hakbang"]
+                      : ["Intentions", "Learning Experience", "Assessment", "Ways Forward"];
+                    const current = parts.findIndex(part => part === activeLessonProperTab);
+                    if (current < parts.length - 1) {
+                      setActiveLessonProperTab(parts[current + 1]);
+                      document.getElementById(["ilaw-intentions-tab", "ilaw-learning-experience-tab", "ilaw-assessment-tab", "ilaw-ways-forward-tab"][current + 1])?.scrollIntoView({ behavior: "smooth", block: "start" });
+                      return;
+                    }
+                    setWorkflowMessage("");
+                    const saved = await savePlan(plan);
+                    if (saved) {
+                      setActiveNavigationSection("07");
+                      window.scrollTo({ top: 0, behavior: "smooth" });
+                    }
+                  }}
+                  disabled={false}
+                  title={undefined}
+                  className="no-print inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-extrabold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {((isFilipino ? ["Intensiyon", "Karanasan sa Pagkatuto", "Pagtataya", "Mga Susunod na Hakbang"] : ["Intentions", "Learning Experience", "Assessment", "Ways Forward"]).indexOf(activeLessonProperTab) === 3)
+                    ? (isFilipino ? "Magpatuloy sa Pag-apruba" : "Proceed to Approval")
+                    : (isFilipino ? "Susunod na Bahagi" : "Next Part")}
+                  <span aria-hidden="true">→</span>
+                </button>
               </div>
-              <button type="button" onClick={() => void savePlan()} disabled={approvedEditMode && !approvedEditSubmissionId} title={approvedEditMode ? "Save approved-plan edits to the existing submission" : `Save the lesson plan from Session ${currentSessionIndex + 1}`} className="no-print inline-flex items-center gap-2 rounded-lg border border-emerald-700 bg-emerald-600 px-4 py-2.5 text-sm font-extrabold text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:border-slate-300"><Save size={16}/> {approvedEditMode ? "Save Changes" : `Save Session ${currentSessionIndex + 1}`}</button>
             </div>
             {workflowMessage && <p role="status" className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{workflowMessage}</p>}
             <div className="mt-4 flex justify-start gap-2"><button type="button" disabled={currentSessionIndex === 0} onClick={() => setActiveSessionTab(plan.sessions[currentSessionIndex - 1].id)} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 disabled:opacity-40">{isFilipino ? "← Nakaraang Sesyon" : "← Previous Session"}</button></div>
           </div>}
         </div>
-        <div className="mt-5 flex flex-col items-end gap-2 border-t border-slate-200 pt-4">
-          {!lessonPlanComplete && <p className="w-full text-xs text-amber-700">{translate("Complete Lesson Information and add at least one session before proceeding to Approval. Reflections are optional.")}</p>}
-          {lessonPlanComplete && !currentPlanIsSaved && <p className="w-full text-xs text-amber-700">{translate("The lesson plan is complete but has unsaved changes. Save the completed plan to enable Approval.")}</p>}
-          <div className="flex w-full justify-end pt-1">
-            <button type="button" onClick={() => { const parts = isFilipino ? ["Intensiyon", "Karanasan sa Pagkatuto", "Pagtataya", "Mga Susunod na Hakbang"] : ["Intentions", "Learning Experience", "Assessment", "Ways Forward"]; const current = parts.findIndex(part => part === activeLessonProperTab); if (current < parts.length - 1) { setActiveLessonProperTab(parts[current + 1]); document.getElementById(["ilaw-intentions-tab", "ilaw-learning-experience-tab", "ilaw-assessment-tab", "ilaw-ways-forward-tab"][current + 1])?.scrollIntoView({ behavior: "smooth", block: "start" }); } }} disabled={(isFilipino ? ["Intensiyon", "Karanasan sa Pagkatuto", "Pagtataya", "Mga Susunod na Hakbang"] : ["Intentions", "Learning Experience", "Assessment", "Ways Forward"]).indexOf(activeLessonProperTab) === 3} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-extrabold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40">{isFilipino ? "Susunod na Bahagi" : "Next Part"} <span aria-hidden="true">→</span></button>
+            </div>
           </div>
+        <div className="mt-5 flex flex-col items-end gap-2 border-t border-slate-200 pt-4">
+          {lessonPlanComplete && !currentPlanIsSaved && <p className="w-full text-xs text-amber-700">{translate("The lesson plan has unsaved changes. Save before submitting sessions for approval.")}</p>}
         </div>
       </>) }
 
@@ -3828,7 +4790,7 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-amber-100 pb-2"><h4 className="font-extrabold text-amber-900">Session {index + 1}{session.title ? ` — ${session.title}` : ""}</h4><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${session.waysForward?.trim() ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>{session.waysForward?.trim() ? "Completed" : "Needs entry"}</span></div>
               <label className="block"><span className="mb-1 block text-xs font-bold text-amber-800">{isFilipino ? `Mga Susunod na Hakbang para sa Sesyon ${index + 1}` : `Ways Forward for Session ${index + 1}`}</span><textarea disabled={controlsLocked} rows={4} value={session.waysForward || ""} onChange={e => updateSession(session.id, "waysForward", e.target.value)} placeholder={translate("Next steps: reteaching, enrichment, learner support, referrals, or adjustments for the next lesson...")} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-100"/></label>
               <label className="mt-3 block"><span className="mb-1 block text-xs font-bold text-amber-800">{translate("Extended learning opportunities")}</span><textarea disabled={controlsLocked} rows={3} value={session.extendedLearning || ""} onChange={e => updateSession(session.id, "extendedLearning", e.target.value)} placeholder={translate("Practice, enrichment, or support beyond this session...")} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label>
-              <label className="mt-3 block"><span className="mb-1 block text-xs font-bold text-violet-800">{translate("Reflections (required to proceed)")}</span><textarea disabled={controlsLocked} rows={3} value={session.reflection || ""} onChange={e => { updateSession(session.id, "reflection", e.target.value); setWorkflowMessage(""); }} placeholder={translate("What did learners understand? What needs reteaching or adjusting?")} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label>
+              <label className="mt-3 block"><span className="mb-1 block text-xs font-bold text-violet-800">{translate("Reflections")}</span><textarea disabled={controlsLocked} rows={3} value={session.reflection || ""} onChange={e => { updateSession(session.id, "reflection", e.target.value); setWorkflowMessage(""); }} placeholder={translate("What did learners understand? What needs reteaching or adjusting?")} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" /></label>
               <div className="mt-4 flex justify-between gap-2"><button type="button" disabled={index === 0} onClick={() => setActiveWaysForwardSessionIndex(index - 1)} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 disabled:opacity-40">{isFilipino ? "← Nakaraang Sesyon" : "← Previous Session"}</button><button type="button" disabled={index >= plan.sessions.length - 1} onClick={() => setActiveWaysForwardSessionIndex(index + 1)} className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">{isFilipino ? "Susunod na Sesyon →" : "Next Session →"}</button></div>
             </div>;
           })()}
@@ -3869,13 +4831,41 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
       </section>}
 
       {activeNavigationSection === "07" && <section data-ilaw-submission className="no-print rounded-2xl border border-indigo-200 bg-white p-5 shadow-sm">
-        <div className="mb-4 rounded-xl border border-sky-200 bg-sky-50/60 p-4">
+        <div className="mb-4 rounded-xs border border-sky-200 bg-sky-50/60 p-4">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <h3 className="font-extrabold text-sky-950">{isFilipino ? `Mga Sesyon para sa Term ${plan.term || "1"}, Linggo ${plan.week || "1"}` : `Sessions for Term ${plan.term || "1"}, Week ${plan.week || "1"}`}</h3>
               <p className="mt-1 text-xs text-slate-600">{isFilipino ? "Bawat sesyon ay may sariling button para isumite ito nang hiwalay para sa pag-apruba." : "Each session has its own button to submit it separately for approval."}</p>
             </div>
-            <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-extrabold text-sky-900">{plan.sessions.filter(session => (plan.savedSessionIds || []).includes(session.id)).length} {isFilipino ? "Naka-save na Sesyon" : "Saved Sessions"}</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-extrabold text-sky-900">{plan.sessions.filter(session => (plan.savedSessionIds || []).includes(session.id)).length} {isFilipino ? "Naka-save na Sesyon" : "Saved Sessions"}</span>
+              <button type="button" onClick={async () => {
+                // Check approval first and ask for confirmation BEFORE opening a new tab.
+                const savedSessions = plan.sessions.filter(item => (plan.savedSessionIds || []).includes(item.id));
+                const email = String(currentUser?.email || "").trim().toLowerCase();
+                const relatedSubmission = submissions.find(item => item.teacherEmail === email && planListIdentity(item.plan) === planListIdentity(plan) && String(item.plan.lessonTitle || "").trim() === String(plan.lessonTitle || "").trim());
+                const allSavedSessionsApproved = savedSessions.length > 0 && savedSessions.every(item => (relatedSubmission?.approvedSessionIds || []).includes(item.id) || relatedSubmission?.sessionStatuses?.[item.id] === "approved");
+                if (!allSavedSessionsApproved) {
+                  const proceed = await showMessageWindow({
+                    title: isFilipino ? "Hindi pa Ganap na Naaprubahan" : "Not Yet Fully Approved",
+                    message: isFilipino
+                      ? "May isa o higit pang sesyon sa banghay-aralin na hindi pa naaprubahan ng Punong-Guro. Maaari mo pa ring tingnan at i-print ang PDF, ngunit hindi ito nangangahulugang aprubado na ang buong banghay-aralin. Magpatuloy?"
+                      : "One or more sessions in this lesson plan have not yet been approved by the School Head. You may still view and print the PDF, but this does not mean the entire lesson plan is approved. Do you want to continue?",
+                    mode: "confirm",
+                    confirmLabel: isFilipino ? "Magpatuloy sa PDF" : "Continue to PDF"
+                  });
+                  if (proceed !== true) return;
+                }
+                // Open the preview only after the user confirms (when confirmation is required).
+                const previewWindow = window.open("", "_blank");
+                if (!previewWindow) {
+                  void showMessageWindow({ title: "Pop-up blocked", message: "Please allow pop-ups for this site to view the ILAW PDF preview.", mode: "info" });
+                  return;
+                }
+                previewWindow.document.write('<!doctype html><title>Preparing ILAW PDF Preview</title><body style="font:16px Arial,sans-serif;padding:32px">Preparing ILAW Lesson Plan…</body>');
+                openPdfPreview(previewWindow);
+              }} className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-extrabold text-emerald-800 hover:bg-emerald-100"><Printer size={15}/> {translate("View PDF / Print")}</button>
+            </div>
           </div>
           <div className="mt-3 space-y-2">
             {plan.sessions.filter(session => (plan.savedSessionIds || []).includes(session.id)).length === 0
@@ -3893,7 +4883,9 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
               const buttonLabel = approvedEditMode ? (isFilipino ? "I-save muna ang mga pagbabago" : "Save Changes first") : isApproved ? (isFilipino ? "Naaprubahan na" : "Already Approved") : status === "pending" ? (isFilipino ? "Naisumite na" : "Submitted") : (isFilipino ? `Isumite ang Sesyon ${sessionIndex + 1} para sa Pag-apruba` : `Submit Session ${sessionIndex + 1} for Approval`);
               return <div key={session.id} className="flex flex-col gap-3 rounded-lg border border-sky-100 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="text-sm font-bold text-slate-800">{isFilipino ? `Sesyon ${sessionIndex + 1}` : `Session ${sessionIndex + 1}`} — {session.lessonSubtitleTitle || session.title || (isFilipino ? "Walang pamagat ng sesyon" : "Untitled session")}</p><span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-extrabold ${statusClass}`}>{statusLabel}</span></div><p className="mt-1 text-xs text-slate-500">{session.title || session.objectives || (isFilipino ? "Wala pang pokus na nakalagay." : "No session focus added yet.")}</p></div>
-                <button type="button" disabled={controlsLocked || approvedEditMode || isApproved || status === "pending"} title={isApproved ? "This session has already been approved." : status === "pending" ? "This session is already awaiting approval." : approvedEditMode ? "Save changes to the existing approved lesson plan first." : `Submit Session ${sessionIndex + 1} individually for School Head approval.`} onClick={() => submitForApproval(session.id)} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-extrabold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"><Send size={15}/> {buttonLabel}</button>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <button type="button" disabled={controlsLocked || approvedEditMode || isApproved || status === "pending"} title={isApproved ? "This session has already been approved." : status === "pending" ? "This session is already awaiting approval." : approvedEditMode ? "Save changes to the existing approved lesson plan first." : `Submit Session ${sessionIndex + 1} individually for School Head approval.`} onClick={() => submitForApproval(session.id)} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-extrabold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"><Send size={15}/> {buttonLabel}</button>
+                </div>
               </div>;
             })}
           </div>
@@ -4019,7 +5011,7 @@ export default function ILAWLessonPlan({ currentUser, assignedSubjects = [], glo
                 {row("Mga Kagamitang Pampagkatuto", "Lesson Materials", s => (s.lessonMaterialIds || []).map(id => lessonMaterials.find(material => material.id === id)?.name).filter(Boolean).join("\n"))}
                 {row("Bago ang Aralin / Pre-Lesson", "Pre-Lesson", s => s.preLesson)}
                 {<tr key="flow"><th>{isFilipino ? "Daloy" : "Flow"}</th>{plan.sessions.map(s => <td key={s.id}><div className="ilaw-assessment-content" dangerouslySetInnerHTML={{ __html: /<[a-z][\s\S]*>/i.test(s.flow || "") ? assessmentHtml(s.flow || "") : flowMarkdownToHtml(s.flow || "") }} /></td>)}</tr>}
-                {row("Kagamitang Pampagkatuto", "Learning Resources", () => plan.learningResources)}
+                {row("Kagamitang Pampagkatuto", "Learning Resources", s => s.learningResources)}
                 {row("Mga Pagkakataon para sa Integrasyon", "Opportunities for integration", () => plan.integration)}
                 {group("PAGTATAYA", "ASSESSMENT")}
                 {<tr key="assessment"><th>{isFilipino ? "Pagtataya na Formative" : "Formative Assessment"}</th>{plan.sessions.map(s => <td key={s.id}><div className="ilaw-assessment-content" dangerouslySetInnerHTML={{__html: assessmentHtml(s.assessment || plan.formativeAssessment || "")}} /></td>)}</tr>}

@@ -2810,3 +2810,5 @@ export const ClassRecordReportModal: React.FC<ClassRecordReportModalProps> = ({
     </div>
   );
 };
+
+export { DEPED_SEAL_DATA_URI, DEPED_LOGO_DATA_URI };

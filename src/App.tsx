@@ -530,6 +530,9 @@ import { formatStudentName, capitalizeName, capitalizeFirst, getSubjectSortScore
 import { INITIAL_STUDENTS, DEFAULT_TERM_DATA } from "./constants";
 import { AttendanceCard } from "./components/AttendanceCard";
 import { DailyAttendanceTracker } from "./components/DailyAttendanceTracker";
+import { AttendanceMonthlySummary } from "./components/AttendanceMonthlySummary";
+import { DailyAttendanceDashboard } from "./components/DailyAttendanceDashboard";
+import { LearnerIndividualRecordView } from "./components/LearnerIndividualRecordView";
 import { SF2ReportView } from "./components/SF2ReportView";
 import { PrintAllSF2Button } from "./components/PrintAllSF2Button";
 import { ObservedValuesTracker } from "./components/ObservedValuesTracker";
@@ -3286,7 +3289,8 @@ export default function App() {
   const [activeSchool, setActiveSchool] = useState<School | null>(null);
   const [teacherCount, setTeacherCount] = useState<number>(0);
   
-  const [activeTab, setActiveTab ] = useState<"dashboard" | "gradebook" | "enroll" | "subjects" | "summary" | "test-analysis" | "guide" | "sys-docs" | "attendance" | "sf2" | "observed-values" | "sf10" | "transfers" | "sf8" | "sf4" | "sf7" | "anecdotes" | "pta" | "tle-dashboard">("dashboard");
+  const [activeTab, setActiveTab ] = useState<"dashboard" | "gradebook" | "enroll" | "subjects" | "summary" | "individual-record" | "test-analysis" | "guide" | "sys-docs" | "attendance" | "sf2" | "observed-values" | "sf10" | "transfers" | "sf8" | "sf4" | "sf7" | "anecdotes" | "pta" | "tle-dashboard">("dashboard");
+  const [attendanceSubTab, setAttendanceSubTab] = useState<'tracker' | 'summary-present' | 'summary-absent' | 'daily-dashboard'>('tracker');
   const [ptaInitialTab, setPtaInitialTab] = useState<'collection' | 'setup' | 'reports' | 'audit'>('collection');
   const [preselectedStudentForAnecdotal, setPreselectedStudentForAnecdotal] = useState<Student | null>(null);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
@@ -4396,7 +4400,7 @@ export default function App() {
   }, [subjects, selectedSubjectId, selectedSection?.id]);
 
   useEffect(() => {
-    if (activeTab !== 'gradebook' && activeTab !== 'summary') return;
+    if (activeTab !== 'gradebook' && activeTab !== 'summary' && activeTab !== 'individual-record') return;
     if (!selectedSection || !selectedSubjectId) {
       setCombinedTleStudents([]);
       return;
@@ -6966,6 +6970,7 @@ export default function App() {
                 { id: 'subjects', label: 'Subjects', shortLabel: 'Subjects', icon: <BookOpen size={14} /> },
                 { id: 'gradebook', label: 'eClass Records', shortLabel: 'eClass Records', icon: <TableIcon size={14} /> },
                 { id: 'summary', label: 'Grading Sheet', shortLabel: 'Grading Sheet', icon: <ClipboardCheck size={14} /> },
+                { id: 'individual-record', label: 'Individual Record', shortLabel: 'Individual Record', icon: <UserCheck size={14} /> },
                 { id: 'test-analysis', label: 'Test Analysis', shortLabel: 'Test Analysis', icon: <BarChart2 size={14} /> },
                 { id: 'transfers', label: 'Transfer Facility', shortLabel: 'Transfers', icon: <Share2 size={14} /> },
                 { id: 'pta', label: 'PTA Fees', shortLabel: 'PTA Fees', icon: <CreditCard size={14} /> },
@@ -6991,6 +6996,8 @@ export default function App() {
                 if (tab.id === 'summary' && !isSectionAdviser) return false;
                  if (tab.id === 'test-analysis' && userProfile?.role !== 'system_admin' && userProfile?.role !== 'admin' && userProfile?.role !== 'teacher') return false;
                 if (tab.id === 'test-analysis' && userProfile?.role === 'teacher' && (!editableSubjects || editableSubjects.length === 0)) return false;
+                if (tab.id === 'individual-record' && userProfile?.role !== 'system_admin' && userProfile?.role !== 'admin' && userProfile?.role !== 'school_head' && userProfile?.role !== 'teacher') return false;
+                if (tab.id === 'individual-record' && userProfile?.role === 'teacher' && (!editableSubjects || editableSubjects.length === 0)) return false;
                 if (tab.id === 'pta' && !(userProfile?.role === 'teacher' && isSectionAdviser)) return false;
                 if (tab.id === 'gradebook' && (!editableSubjects || editableSubjects.length === 0) && !isSectionAdviser) return false;
                 if ((tab.id === 'attendance' || tab.id === 'sf2') && !hasCalendarMatch) return false;
@@ -6999,7 +7006,7 @@ export default function App() {
 
                 if (userProfile?.role === 'system_admin' || userProfile?.role === 'admin' || isAuthorizedCashier) {
                   const allowedTabsList = [
-                    'dashboard', 'enroll', 'subjects', 'pta', 'sf8', 'guide', 'sys-docs', 'gradebook', 'summary', 'test-analysis', 'attendance', 'observed-values', 'sf2', 'transfers', 'sf10', 'sf4', 'sf7', 'anecdotes', 'logs', 'logs-clear', 'aral'
+                    'dashboard', 'enroll', 'subjects', 'pta', 'sf8', 'guide', 'sys-docs', 'gradebook', 'summary', 'individual-record', 'test-analysis', 'attendance', 'observed-values', 'sf2', 'transfers', 'sf10', 'sf4', 'sf7', 'anecdotes', 'logs', 'logs-clear', 'aral'
                   ];
                   if (userProfile?.role === 'system_admin') {
                     return allowedTabsList.filter(id => {
@@ -7013,16 +7020,16 @@ export default function App() {
                   return allowedTabsList.filter(id => id !== 'sf4').includes(tab.id);
                 }
                 if (userProfile?.role === 'school_head') {
-                   return ['sf8', 'sf4', 'sf10', 'anecdotes', 'aral'].includes(tab.id);
+                   return ['sf8', 'sf4', 'sf10', 'anecdotes', 'aral', 'individual-record'].includes(tab.id);
                 }
                 if (userProfile?.role === 'guidance_designate') {
                    return ['anecdotes', 'aral'].includes(tab.id);
                 }
                 if (userProfile?.role === 'teacher') {
                   if (isSectionAdviser) {
-                    return ['dashboard', 'enroll', 'subjects', 'pta', 'sf8', 'sf10', 'attendance', 'observed-values', 'sf2', 'transfers', 'anecdotes', 'guide', 'gradebook', 'summary', 'test-analysis', 'aral'].includes(tab.id);
+                    return ['dashboard', 'enroll', 'subjects', 'pta', 'sf8', 'sf10', 'attendance', 'observed-values', 'sf2', 'transfers', 'anecdotes', 'guide', 'gradebook', 'summary', 'individual-record', 'test-analysis', 'aral'].includes(tab.id);
                   }
-                  return tab.id === 'gradebook' || tab.id === 'test-analysis' || tab.id === 'dashboard' || tab.id === 'anecdotes' || tab.id === 'pta' || tab.id === 'aral';
+                  return tab.id === 'gradebook' || tab.id === 'individual-record' || tab.id === 'test-analysis' || tab.id === 'dashboard' || tab.id === 'anecdotes' || tab.id === 'pta' || tab.id === 'aral';
                 }
                 return true;
               });
@@ -7031,6 +7038,7 @@ export default function App() {
                 <button
                   key={tab.id}
                   onClick={() => {
+                    if (tab.id === 'attendance') setAttendanceSubTab('tracker');
                     setActiveTab(tab.id as any);
                     setOpenDropdown(null);
                     setIsSettingsDropdownOpen(false);
@@ -7049,7 +7057,7 @@ export default function App() {
 
               const mgmtTabs = allowedTabs.filter(t => ['enroll', 'transfers', 'sf8', 'pta'].includes(t.id));
               const attTabs = allowedTabs.filter(t => ['attendance', 'sf2', 'observed-values', 'anecdotes'].includes(t.id));
-              const academicTabs = allowedTabs.filter(t => ['subjects', 'gradebook', 'summary', 'test-analysis', 'sf10', 'sf4', 'sf7'].includes(t.id));
+              const academicTabs = allowedTabs.filter(t => ['subjects', 'gradebook', 'summary', 'individual-record', 'test-analysis', 'sf10', 'sf4', 'sf7'].includes(t.id));
               const supportTabsGroup = allowedTabs.filter(t => ['guide', 'sys-docs'].includes(t.id));
 
               const renderDropdown = (id: string, label: string, icon: React.ReactNode, tabs: any[]) => {
@@ -7083,6 +7091,7 @@ export default function App() {
                             <button
                               key={tab.id}
                               onClick={() => {
+                                if (tab.id === 'attendance') setAttendanceSubTab('tracker');
                                 setActiveTab(tab.id as any);
                                 setIsOpen(false);
                               }}
@@ -7251,6 +7260,7 @@ export default function App() {
             { id: 'subjects', label: 'Subjects', icon: <BookOpen size={14} /> },
             { id: 'gradebook', label: 'eClass Records', icon: <TableIcon size={14} /> },
             { id: 'summary', label: 'Grading Sheet', icon: <ClipboardCheck size={14} /> },
+            { id: 'individual-record', label: 'Individual Record', icon: <UserCheck size={14} /> },
             { id: 'sf8', label: 'SF8 Health', icon: <Activity size={14} /> },
             { id: 'transfers', label: 'Transfers', icon: <Share2 size={14} /> },
             { id: 'attendance', label: 'Attendance', icon: <Calendar size={14} /> },
@@ -7267,22 +7277,27 @@ export default function App() {
             if (tab.id === 'summary' && !isSectionAdviser) return false;
                  if (tab.id === 'test-analysis' && userProfile?.role !== 'system_admin' && userProfile?.role !== 'admin' && userProfile?.role !== 'teacher') return false;
                 if (tab.id === 'test-analysis' && userProfile?.role === 'teacher' && (!editableSubjects || editableSubjects.length === 0)) return false;
+            if (tab.id === 'individual-record' && userProfile?.role !== 'system_admin' && userProfile?.role !== 'admin' && userProfile?.role !== 'school_head' && userProfile?.role !== 'teacher') return false;
+            if (tab.id === 'individual-record' && userProfile?.role === 'teacher' && (!editableSubjects || editableSubjects.length === 0)) return false;
             if (tab.id === 'pta' && !(userProfile?.role === 'teacher' && isSectionAdviser)) return false;
             if (tab.id === 'gradebook' && (!editableSubjects || editableSubjects.length === 0) && !isSectionAdviser) return false;
             if ((tab.id === 'attendance' || tab.id === 'sf2') && !hasCalendarMatch) return false;
 
             if (userProfile?.role === 'system_admin' || userProfile?.role === 'admin') return true;
-            if (userProfile?.role === 'school_head') return ['sf8', 'sf10', 'anecdotes'].includes(tab.id);
+            if (userProfile?.role === 'school_head') return ['sf8', 'sf10', 'anecdotes', 'individual-record'].includes(tab.id);
             if (userProfile?.role === 'guidance_designate') return ['anecdotes'].includes(tab.id);
             if (userProfile?.role === 'teacher') {
               if (isSectionAdviser) return true;
-              return ['gradebook', 'test-analysis', 'dashboard', 'anecdotes', 'pta'].includes(tab.id);
+              return ['gradebook', 'individual-record', 'test-analysis', 'dashboard', 'anecdotes', 'pta'].includes(tab.id);
             }
             return true;
           }).map(tab => (
             <button
               key={'sub-bar-' + tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
+              onClick={() => {
+                if (tab.id === 'attendance') setAttendanceSubTab('tracker');
+                setActiveTab(tab.id as any);
+              }}
               className={`px-3 py-1.5 shrink-0 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 snap-start ${
                 activeTab === tab.id 
                   ? 'bg-indigo-50 text-indigo-700 border border-indigo-200/80 shadow-2xs font-extrabold' 
@@ -7378,6 +7393,7 @@ export default function App() {
                         { id: 'subjects', label: 'Section Subjects', desc: 'Subject assignments', icon: <BookOpen size={18} /> },
                         { id: 'gradebook', label: 'eClass Records', desc: 'Input grades & exam scores', icon: <TableIcon size={18} /> },
                         { id: 'summary', label: 'Grading Sheet', desc: 'Quarterly summary sheet', icon: <ClipboardCheck size={18} /> },
+                        { id: 'individual-record', label: 'Individual Record', desc: 'Learner term scores by assigned subject', icon: <UserCheck size={18} /> },
                          { id: 'test-analysis', label: 'Test Analysis', desc: 'MPS, Mean, SD & item analysis for authorized users', icon: <BarChart2 size={18} /> },
                         { id: 'sf10', label: 'Learner Record (SF10)', desc: 'Permanent transcript', icon: <HistoryIcon size={18} /> },
                         //{ id: 'sf4', label: 'School Form 4 (SF4)', desc: 'Monthly movement summary', icon: <FileText size={18} /> },
@@ -7400,6 +7416,8 @@ export default function App() {
                     if (tabId === 'subjects' && userProfile?.role !== 'system_admin' && userProfile?.role !== 'admin' && !isSectionAdviser) return false;
                     if (tabId === 'summary' && !isSectionAdviser) return false;
                      if (tabId === 'test-analysis' && userProfile?.role !== 'system_admin' && userProfile?.role !== 'admin' && userProfile?.role !== 'teacher') return false;
+                    if (tabId === 'individual-record' && userProfile?.role !== 'system_admin' && userProfile?.role !== 'admin' && userProfile?.role !== 'school_head' && userProfile?.role !== 'teacher') return false;
+                    if (tabId === 'individual-record' && userProfile?.role === 'teacher' && (!editableSubjects || editableSubjects.length === 0)) return false;
                     if (tabId === 'pta' && !(userProfile?.role === 'teacher' && isSectionAdviser)) return false;
                     if (tabId === 'gradebook' && (!editableSubjects || editableSubjects.length === 0) && !isSectionAdviser) return false;
                     if ((tabId === 'attendance' || tabId === 'sf2') && !hasCalendarMatch) return false;
@@ -7407,11 +7425,11 @@ export default function App() {
                     if (tabId === 'sf7' && userProfile?.role !== 'system_admin' && userProfile?.role !== 'admin') return false;
 
                     if (userProfile?.role === 'system_admin' || userProfile?.role === 'admin' || isAuthorizedCashier) return true;
-                    if (userProfile?.role === 'school_head') return ['sf8', 'sf4', 'sf10', 'anecdotes', 'aral'].includes(tabId);
+                    if (userProfile?.role === 'school_head') return ['sf8', 'sf4', 'sf10', 'anecdotes', 'aral', 'individual-record'].includes(tabId);
                     if (userProfile?.role === 'guidance_designate') return ['anecdotes', 'aral'].includes(tabId);
                     if (userProfile?.role === 'teacher') {
                       if (isSectionAdviser) return true;
-                      return ['gradebook', 'test-analysis', 'dashboard', 'anecdotes', 'pta', 'aral'].includes(tabId);
+                      return ['gradebook', 'individual-record', 'test-analysis', 'dashboard', 'anecdotes', 'pta', 'aral'].includes(tabId);
                     }
                     return true;
                   };
@@ -7436,6 +7454,7 @@ export default function App() {
                                   <button
                                     key={'drawer-tab-' + t.id}
                                     onClick={() => {
+                                      if (t.id === 'attendance') setAttendanceSubTab('tracker');
                                       setActiveTab(t.id as any);
                                       setIsMobileNavOpen(false);
                                     }}
@@ -7531,8 +7550,8 @@ export default function App() {
       </AnimatePresence>
 
       {/* Workspace Area */}
-      <main className={`flex-1 overflow-auto bg-[#fcfdfe] scroll-smooth custom-scrollbar ${['gradebook', 'summary', 'test-analysis', 'dashboard', 'subjects', 'enroll', 'guide', 'sf8', 'transfers', 'sf10', 'observed-values', 'pta', 'tle-dashboard'].includes(activeTab) ? 'p-0' : 'p-6 md:p-12'}`}>
-        <div className={`${['gradebook', 'summary', 'test-analysis', 'dashboard', 'subjects', 'enroll', 'guide', 'sf8', 'transfers', 'sf10', 'observed-values', 'pta', 'tle-dashboard'].includes(activeTab) ? 'w-full' : 'max-w-full 2xl:max-w-[1600px] mx-auto w-full'}`}>
+      <main className={`flex-1 overflow-auto bg-[#fcfdfe] scroll-smooth custom-scrollbar ${['gradebook', 'summary', 'individual-record', 'test-analysis', 'dashboard', 'subjects', 'enroll', 'guide', 'sf8', 'transfers', 'sf10', 'observed-values', 'pta', 'tle-dashboard'].includes(activeTab) ? 'p-0' : 'p-6 md:p-12'}`}>
+        <div className={`${['gradebook', 'summary', 'individual-record', 'test-analysis', 'dashboard', 'subjects', 'enroll', 'guide', 'sf8', 'transfers', 'sf10', 'observed-values', 'pta', 'tle-dashboard'].includes(activeTab) ? 'w-full' : 'max-w-full 2xl:max-w-[1600px] mx-auto w-full'}`}>
           <AnimatePresence mode="wait">
             {activeTab === 'tle-dashboard' && (
               <motion.div
@@ -7617,6 +7636,31 @@ export default function App() {
                   onToggleFinalizeSubjectTerm={handleToggleFinalizeSubjectTerm}
                   currentUser={userProfile}
                   globalSettings={globalSettings}
+                />
+              </motion.div>
+            )}
+            {activeTab === 'individual-record' && selectedSection && (
+              <motion.div
+                key="individual-record"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+                className="flex flex-col"
+              >
+                <LearnerIndividualRecordView
+                  students={combinedTleStudents.length > 0 ? combinedTleStudents : enrolledStudents}
+                  assignedSubjects={userProfile?.role === 'teacher' ? editableSubjects : subjects}
+                  selectedSubjectId={selectedSubjectId}
+                  onSelectSubject={setSelectedSubjectId}
+                  activeTerm={activeTerm}
+                  onTermChange={setActiveTerm}
+                  selectedSection={selectedSection}
+                  activeSchool={activeSchool}
+                  currentUser={userProfile}
+                  globalNumTerms={globalNumTerms}
+                  calculateGrade={calculateGrade}
+                  getDescriptiveRemark={getDescriptiveRemark}
                 />
               </motion.div>
             )}
@@ -7756,18 +7800,36 @@ export default function App() {
             )}
             {(activeTab === 'attendance' || activeTab === 'sf2') && selectedSection && (
               <motion.div 
-                key={activeTab}
+                key="attendance-workspace"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.2 }}
               >
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 print:hidden">
                   <div>
                      <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">
-                       {activeTab === 'sf2' ? 'School Form 2 Report' : 'Daily Attendance'}
+                       {activeTab === 'sf2'
+                         ? 'School Form 2 Report'
+                         : attendanceSubTab === 'summary-present'
+                         ? 'Monthly Attendance Summary (Present)'
+                         : attendanceSubTab === 'summary-absent'
+                         ? 'Monthly Attendance Summary (Absent)'
+                         : attendanceSubTab === 'daily-dashboard'
+                         ? 'Daily Attendance Dashboard'
+                         : 'Daily Attendance'}
                      </h2>
-                     <p className="text-sm text-slate-500 font-medium">{activeTab === 'sf2' ? 'Summary report of learner attendance.' : 'Record and manage learner daily attendance.'}</p>
+                     <p className="text-sm text-slate-500 font-medium">
+                       {activeTab === 'sf2'
+                         ? 'Summary report of learner attendance.'
+                         : attendanceSubTab === 'summary-present'
+                         ? 'Monthly total number of days present per learner.'
+                         : attendanceSubTab === 'summary-absent'
+                         ? 'Monthly total number of days absent per learner.'
+                         : attendanceSubTab === 'daily-dashboard'
+                         ? 'Daily attendance overview and quick learner status.'
+                         : 'Record and manage learner daily attendance.'}
+                     </p>
                   </div>
                   {userProfile?.role === 'system_admin' && (
                     <PrintAllSF2Button 
@@ -7778,12 +7840,109 @@ export default function App() {
                     />
                   )}
                 </div>
+
+                <div className="flex items-center gap-6 sm:gap-8 border-b border-slate-200 mb-6 overflow-x-auto print:hidden">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('attendance');
+                      setAttendanceSubTab('tracker');
+                    }}
+                    className={`-mb-px pb-3 text-sm whitespace-nowrap border-b-2 transition-colors cursor-pointer ${
+                      activeTab === 'attendance' && attendanceSubTab === 'tracker'
+                        ? 'border-indigo-600 text-indigo-600 font-semibold'
+                        : 'border-transparent text-slate-600 hover:text-slate-900 font-medium'
+                    }`}
+                  >
+                    Daily Tracker
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('sf2')}
+                    className={`-mb-px pb-3 text-sm whitespace-nowrap border-b-2 transition-colors cursor-pointer ${
+                      activeTab === 'sf2'
+                        ? 'border-indigo-600 text-indigo-600 font-semibold'
+                        : 'border-transparent text-slate-600 hover:text-slate-900 font-medium'
+                    }`}
+                  >
+                    SF2 Report
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('attendance');
+                      setAttendanceSubTab('summary-present');
+                    }}
+                    className={`-mb-px pb-3 text-sm whitespace-nowrap border-b-2 transition-colors cursor-pointer ${
+                      activeTab === 'attendance' && attendanceSubTab === 'summary-present'
+                        ? 'border-indigo-600 text-indigo-600 font-semibold'
+                        : 'border-transparent text-slate-600 hover:text-slate-900 font-medium'
+                    }`}
+                  >
+                    Summary (Present)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('attendance');
+                      setAttendanceSubTab('summary-absent');
+                    }}
+                    className={`-mb-px pb-3 text-sm whitespace-nowrap border-b-2 transition-colors cursor-pointer ${
+                      activeTab === 'attendance' && attendanceSubTab === 'summary-absent'
+                        ? 'border-indigo-600 text-indigo-600 font-semibold'
+                        : 'border-transparent text-slate-600 hover:text-slate-900 font-medium'
+                    }`}
+                  >
+                    Summary (Absent)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('attendance');
+                      setAttendanceSubTab('daily-dashboard');
+                    }}
+                    className={`-mb-px pb-3 text-sm whitespace-nowrap border-b-2 transition-colors cursor-pointer ${
+                      activeTab === 'attendance' && attendanceSubTab === 'daily-dashboard'
+                        ? 'border-indigo-600 text-indigo-600 font-semibold'
+                        : 'border-transparent text-slate-600 hover:text-slate-900 font-medium'
+                    }`}
+                  >
+                    Daily Dashboard
+                  </button>
+                </div>
+
                 {activeTab === 'sf2' ? (
                   <SF2ReportView 
                     students={sf2ReportStudents}
                     calendar={sectionSchoolCalendar}
                     section={selectedSection}
                     userId={currentUser?.uid}
+                  />
+                ) : attendanceSubTab === 'summary-present' ? (
+                  <AttendanceMonthlySummary
+                    mode="present"
+                    students={attendanceSF2Students}
+                    calendar={sectionSchoolCalendar}
+                    schoolYear={selectedSection?.schoolYear}
+                    section={selectedSection}
+                  />
+                ) : attendanceSubTab === 'summary-absent' ? (
+                  <AttendanceMonthlySummary
+                    mode="absent"
+                    students={attendanceSF2Students}
+                    calendar={sectionSchoolCalendar}
+                    schoolYear={selectedSection?.schoolYear}
+                    section={selectedSection}
+                  />
+                ) : attendanceSubTab === 'daily-dashboard' ? (
+                  <DailyAttendanceDashboard
+                    students={attendanceSF2Students}
+                    calendar={sectionSchoolCalendar}
+                    schoolYear={selectedSection?.schoolYear}
+                    section={selectedSection}
+                    scanLogs={scanLogs}
+                    onUpdateAttendance={handleUpdateDailyAttendance}
+                    onScanID={openGlobalScanner}
                   />
                 ) : (
                   <DailyAttendanceTracker 
