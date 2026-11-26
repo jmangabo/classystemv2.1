@@ -5703,6 +5703,14 @@ export default function App() {
     );
   }, [students]);
 
+  // Daily Attendance Tracker displays both Transferred Out and Dropped Out learners
+  // up through their exit month, disabling days on/after their exit date.
+  const dailyAttendanceTrackerStudents = useMemo(() => {
+    return students.filter(
+      s => s.enrolledSubjectIds && s.enrolledSubjectIds.length > 0
+    );
+  }, [students]);
+
   // SF2 uses the same attendance population:
   // - Transfer In: included
   // - Transferred Out: included
@@ -5738,9 +5746,13 @@ export default function App() {
     };
   }, [currentUser?.uid]);
 
+  // SF2 uses the same attendance population as Daily Attendance Tracker:
+  // - Transfer In: included
+  // - Transferred Out: included (hidden after exit month inside SF2ReportView)
+  // - Dropped Out: included (hidden after exit month inside SF2ReportView)
   const sf2ReportStudents = useMemo(() => {
-    return attendanceSF2Students.filter(student => student.status !== 'Dropped Out');
-  }, [attendanceSF2Students, sf2SelectedMonthKey, sectionSchoolCalendar]);
+    return dailyAttendanceTrackerStudents;
+  }, [dailyAttendanceTrackerStudents]);
 
   const enrolledStudents = useMemo(() => {
     return students.filter(
@@ -7946,7 +7958,7 @@ export default function App() {
                   />
                 ) : (
                   <DailyAttendanceTracker 
-                    students={attendanceSF2Students}
+                    students={dailyAttendanceTrackerStudents}
                     calendar={sectionSchoolCalendar} 
                     schoolYear={selectedSection?.schoolYear}
                     onUpdateAttendance={handleUpdateDailyAttendance} 

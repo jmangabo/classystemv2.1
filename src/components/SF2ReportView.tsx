@@ -692,6 +692,12 @@ export const SF2ReportView: React.FC<SF2ReportViewProps> = ({ students, calendar
                     <td class="text-center font-bold" style="font-weight: 900;">${summaryData?.absent5Consecutive.t}</td>
                   </tr>
                   <tr>
+                    <td class="font-bold" style="font-style: italic; font-size: 7px;">Dropped Out</td>
+                    <td class="text-center font-bold">${summaryData?.droppedOut?.m ?? 0}</td>
+                    <td class="text-center font-bold">${summaryData?.droppedOut?.f ?? 0}</td>
+                    <td class="text-center font-bold" style="font-weight: 900;">${summaryData?.droppedOut?.t ?? 0}</td>
+                  </tr>
+                  <tr>
                     <td class="font-bold" style="font-style: italic; font-size: 7px;">Transferred Out</td>
                     <td class="text-center font-bold">${summaryData?.transferredOut.m}</td>
                     <td class="text-center font-bold">${summaryData?.transferredOut.f}</td>
@@ -1048,16 +1054,23 @@ const getMonthlyExitRemark = (student: Student) => {
     });
 
     if (student.status === 'Dropped Out') {
-      const reason = String(
-        (student as any).dropoutReason ||
-        (student as any).reason ||
-        ''
-      ).trim();
+      const rawDropReason: any = (student as any).dropoutReason ?? (student as any).reason;
+      const reason =
+        rawDropReason && typeof rawDropReason === 'object'
+          ? String(
+              rawDropReason.label ??
+              rawDropReason.name ??
+              rawDropReason.reason ??
+              rawDropReason.value ??
+              ''
+            ).trim()
+          : String(rawDropReason ?? '').trim();
 
+      const safeReason = reason || 'Not specified';
       return {
-        text: reason
-          ? `DROPPED OUT — ${dateText} — Reason: ${reason}`
-          : `DROPPED OUT — ${dateText} — Reason: Not specified`,
+        text: `DROPPED OUT — ${dateText}\nReason: ${safeReason}`,
+        shortText: `D/O — ${dateText}\n${safeReason}`,
+        className: 'text-red-700',
         colorClass: 'text-red-700',
         htmlColor: '#b91c1c'
       };
@@ -1591,6 +1604,43 @@ const getMonthlyExitRemark = (student: Student) => {
       absent5ConsecMale + absent5ConsecFemale;
 
     // ============================================================
+    // DROPPED OUT IN CURRENT MONTH
+    // ============================================================
+    const isDroppedOutInCurrentMonth = (
+      s: Student
+    ) => {
+      if (s.status !== 'Dropped Out') {
+        return false;
+      }
+
+      if (!s.dropoutDate) return false;
+
+      const dParts = s.dropoutDate.split('-');
+      if (dParts.length !== 3) return false;
+
+      const dropYear = parseInt(dParts[0], 10);
+      const dropMonth = parseInt(dParts[1], 10) - 1;
+
+      return (
+        currentMonthData.year === dropYear &&
+        monthIndices[currentMonthData.month] === dropMonth
+      );
+    };
+
+    const dropOutMale =
+      sortedStudents.male.filter(
+        isDroppedOutInCurrentMonth
+      ).length;
+
+    const dropOutFemale =
+      sortedStudents.female.filter(
+        isDroppedOutInCurrentMonth
+      ).length;
+
+    const dropOutTotal =
+      dropOutMale + dropOutFemale;
+
+    // ============================================================
     // TRANSFERRED OUT IN CURRENT MONTH
     // ============================================================
     const isTransferredOutInCurrentMonth = (
@@ -1709,6 +1759,12 @@ const getMonthlyExitRemark = (student: Student) => {
         m: absent5ConsecMale,
         f: absent5ConsecFemale,
         t: absent5ConsecTotal
+      },
+
+      droppedOut: {
+        m: dropOutMale,
+        f: dropOutFemale,
+        t: dropOutTotal
       },
 
       transferredOut: {
@@ -1985,6 +2041,7 @@ const getMonthlyExitRemark = (student: Student) => {
         ["Average Daily Attendance", summaryData.avgAttendance.m.toFixed(2), summaryData.avgAttendance.f.toFixed(2), summaryData.avgAttendance.t.toFixed(2)],
         ["Percentage of Attendance", `${summaryData.percAttendance.m.toFixed(2)}%`, `${summaryData.percAttendance.f.toFixed(2)}%`, `${summaryData.percAttendance.t.toFixed(2)}%`],
         ["Absent 5+ Consecutive Days", summaryData.absent5Consecutive.m, summaryData.absent5Consecutive.f, summaryData.absent5Consecutive.t],
+        ["Dropped Out", summaryData.droppedOut.m, summaryData.droppedOut.f, summaryData.droppedOut.t],
         ["Transferred Out", summaryData.transferredOut.m, summaryData.transferredOut.f, summaryData.transferredOut.t],
         ["Transferred In", summaryData.transferredIn.m, summaryData.transferredIn.f, summaryData.transferredIn.t]
       ];
@@ -2827,6 +2884,12 @@ const getMonthlyExitRemark = (student: Student) => {
                          <td className="border border-black p-1 text-center font-bold">{summaryData?.absent5Consecutive.t}</td>
                        </tr>
                        <tr>
+                         <td className="border border-black p-1 font-bold italic text-xs">Dropped Out</td>
+                         <td className="border border-black p-1 text-center font-bold">{summaryData?.droppedOut?.m ?? 0}</td>
+                         <td className="border border-black p-1 text-center font-bold">{summaryData?.droppedOut?.f ?? 0}</td>
+                         <td className="border border-black p-1 text-center font-bold">{summaryData?.droppedOut?.t ?? 0}</td>
+                       </tr>
+                       <tr>
                          <td className="border border-black p-1 font-bold italic text-xs">Transferred Out</td>
                          <td className="border border-black p-1 text-center font-bold">{summaryData?.transferredOut.m}</td>
                          <td className="border border-black p-1 text-center font-bold">{summaryData?.transferredOut.f}</td>
@@ -3099,6 +3162,12 @@ const getMonthlyExitRemark = (student: Student) => {
                             <td className="border border-black p-0.5 text-center font-bold">{summaryData?.absent5Consecutive.m}</td>
                             <td className="border border-black p-0.5 text-center font-bold">{summaryData?.absent5Consecutive.f}</td>
                             <td className="border border-black p-0.5 text-center font-black">{summaryData?.absent5Consecutive.t}</td>
+                          </tr>
+                          <tr className="text-[7.5px]">
+                            <td className="border border-black px-1 py-0.5 font-bold italic text-[7px]">Dropped Out</td>
+                            <td className="border border-black p-0.5 text-center font-bold">{summaryData?.droppedOut?.m ?? 0}</td>
+                            <td className="border border-black p-0.5 text-center font-bold">{summaryData?.droppedOut?.f ?? 0}</td>
+                            <td className="border border-black p-0.5 text-center font-black">{summaryData?.droppedOut?.t ?? 0}</td>
                           </tr>
                           <tr className="text-[7.5px]">
                             <td className="border border-black px-1 py-0.5 font-bold italic text-[7px]">Transferred Out</td>
